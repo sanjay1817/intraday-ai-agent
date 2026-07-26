@@ -1,0 +1,66 @@
+<h1>Auto Trading Status</h1>
+
+<div class="error-banner" *ngIf="error()">{{ error() }}</div>
+
+<div *ngIf="status() as s">
+  <div class="card banner" [class.running]="s.running">
+    <span class="dot"></span>
+    {{ s.running ? 'Auto trading is RUNNING' : 'Auto trading is STOPPED' }}
+  </div>
+
+  <div class="grid grid-cols-auto stats">
+    <div class="card">
+      <div class="label">Started At</div>
+      <div class="value">{{ s.started_at ? (s.started_at | date: 'medium') : '—' }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Cycle Count</div>
+      <div class="value">{{ s.cycle_count }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Last Cycle At</div>
+      <div class="value">{{ s.last_cycle_at ? (s.last_cycle_at | date: 'medium') : '—' }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Open Positions</div>
+      <div class="value">{{ s.open_position_count }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Trades Today</div>
+      <div class="value">{{ s.trades_today }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Daily Realized P&amp;L</div>
+      <div
+        class="value"
+        [class.pnl-positive]="s.daily_realized_pnl >= 0"
+        [class.pnl-negative]="s.daily_realized_pnl < 0"
+      >
+        ₹{{ s.daily_realized_pnl | number: '1.2-2' }}
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Consecutive Losses</div>
+      <div class="value">{{ s.consecutive_losses }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Cooldown Until</div>
+      <div class="value">{{ s.cooldown_until ? (s.cooldown_until | date: 'medium') : '—' }}</div>
+    </div>
+  </div>
+
+  <div class="card error-card" *ngIf="s.last_error">
+    <div class="label">Last Error</div>
+    <div class="error-text">{{ s.last_error }}</div>
+  </div>
+
+  <div class="card">
+    <h3>Tracked Symbols ({{ s.symbols.length }})</h3>
+    <div class="symbols" *ngIf="s.symbols.length; else noSymbols">
+      <span class="badge" *ngFor="let symbol of s.symbols">{{ symbol }}</span>
+    </div>
+    <ng-template #noSymbols>
+      <div class="empty-state">No symbols configured</div>
+    </ng-template>
+  </div>
+</div>

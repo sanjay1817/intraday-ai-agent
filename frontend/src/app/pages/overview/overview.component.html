@@ -1,0 +1,51 @@
+<h1>Overview</h1>
+
+<div class="error-banner" *ngIf="error()">{{ error() }}</div>
+
+<div class="grid grid-cols-auto summary" *ngIf="portfolio() as p">
+  <div class="card">
+    <div class="label">Equity</div>
+    <div class="value">₹{{ p.equity | number: '1.2-2' }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Cash</div>
+    <div class="value">₹{{ p.cash | number: '1.2-2' }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Total P&amp;L</div>
+    <div class="value" [class.pnl-positive]="p.total_pnl >= 0" [class.pnl-negative]="p.total_pnl < 0">
+      ₹{{ p.total_pnl | number: '1.2-2' }}
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Open Positions</div>
+    <div class="value">{{ p.positions.length }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Auto Trading</div>
+    <div class="value">
+      <span class="badge" [class.running]="autoStatus()?.running" [class.stopped]="!autoStatus()?.running">
+        {{ autoStatus()?.running ? 'Running' : 'Stopped' }}
+      </span>
+    </div>
+  </div>
+</div>
+
+<div class="grid grid-cols-auto charts">
+  <div class="card">
+    <h3>Portfolio Equity Curve</h3>
+    <app-line-chart [points]="equityHistory()"></app-line-chart>
+  </div>
+  <div class="card">
+    <h3>Daily P&amp;L</h3>
+    <app-bar-chart [points]="dailyPnl()"></app-bar-chart>
+  </div>
+  <div class="card">
+    <h3>Win / Loss Ratio</h3>
+    <app-donut-chart [slices]="winLossSlices()"></app-donut-chart>
+  </div>
+  <div class="card">
+    <h3>Trade Distribution by Symbol</h3>
+    <app-bar-chart [points]="tradeDistribution()" singleColor="var(--accent)"></app-bar-chart>
+  </div>
+</div>

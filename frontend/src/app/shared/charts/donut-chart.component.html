@@ -1,0 +1,16 @@
+<div class="donut-wrap" *ngIf="!isEmpty(); else empty">
+  <svg viewBox="0 0 100 100" [style.width.px]="size" [style.height.px]="size">
+    <path *ngFor="let slice of rendered()" [attr.d]="slice.path" [attr.fill]="slice.color">
+      <title>{{ slice.label }}: {{ slice.value }} ({{ slice.percent }}%)</title>
+    </path>
+  </svg>
+  <ul class="legend">
+    <li *ngFor="let slice of rendered()">
+      <span class="swatch" [style.background]="slice.color"></span>
+      {{ slice.label }} — {{ slice.value }} ({{ slice.percent }}%)
+    </li>
+  </ul>
+</div>
+<ng-template #empty>
+  <div class="empty-state">No trades yet</div>
+</ng-template>

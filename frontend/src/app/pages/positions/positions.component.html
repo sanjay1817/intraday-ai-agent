@@ -1,0 +1,47 @@
+<h1>Open Positions</h1>
+
+<div class="error-banner" *ngIf="error()">{{ error() }}</div>
+
+<div class="card">
+  <div class="table-wrap" *ngIf="positions().length; else empty">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Exchange</th>
+          <th>Side</th>
+          <th>Qty</th>
+          <th>Avg Price</th>
+          <th>Last Price</th>
+          <th>Realized P&amp;L</th>
+          <th>Unrealized P&amp;L</th>
+          <th>Opened At</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let pos of positions()">
+          <td>{{ pos.symbol }}</td>
+          <td>{{ pos.exchange }}</td>
+          <td>
+            <span class="badge" [class.buy]="pos.quantity > 0" [class.sell]="pos.quantity < 0">
+              {{ pos.quantity > 0 ? 'LONG' : 'SHORT' }}
+            </span>
+          </td>
+          <td>{{ pos.quantity }}</td>
+          <td>{{ pos.average_price | number: '1.2-2' }}</td>
+          <td>{{ pos.last_price | number: '1.2-2' }}</td>
+          <td [class.pnl-positive]="pos.realized_pnl >= 0" [class.pnl-negative]="pos.realized_pnl < 0">
+            {{ pos.realized_pnl | number: '1.2-2' }}
+          </td>
+          <td [class.pnl-positive]="pos.unrealized_pnl >= 0" [class.pnl-negative]="pos.unrealized_pnl < 0">
+            {{ pos.unrealized_pnl | number: '1.2-2' }}
+          </td>
+          <td>{{ pos.opened_at | date: 'short' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #empty>
+    <div class="empty-state">No open positions</div>
+  </ng-template>
+</div>

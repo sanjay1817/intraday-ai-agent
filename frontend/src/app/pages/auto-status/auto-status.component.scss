@@ -1,0 +1,57 @@
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-bottom: 1.25rem;
+  font-weight: 600;
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-muted);
+  }
+
+  &.running .dot {
+    background: var(--green);
+  }
+}
+
+.stats {
+  margin-bottom: 1.25rem;
+}
+
+.label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-bottom: 0.3rem;
+}
+
+.value {
+  font-size: 1.2rem;
+  font-weight: 700;
+}
+
+.error-card {
+  margin-bottom: 1.25rem;
+  border-color: var(--red);
+}
+
+.error-text {
+  color: var(--red);
+  font-size: 13px;
+}
+
+.symbols {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+h3 {
+  margin: 0 0 0.75rem;
+  font-size: 13px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}

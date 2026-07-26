@@ -1,0 +1,35 @@
+<div class="shell">
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="hamburger" (click)="toggleMenu()" aria-label="Toggle navigation">☰</button>
+      <span class="brand">Intraday Trading Dashboard</span>
+    </div>
+    <div class="topbar-right">
+      <button class="theme-toggle" (click)="theme.toggle()" [attr.aria-label]="'Toggle dark mode'">
+        {{ theme.isDark() ? '☀️' : '🌙' }}
+      </button>
+    </div>
+  </header>
+
+  <div class="controls-row">
+    <app-controls-bar></app-controls-bar>
+  </div>
+
+  <div class="body">
+    <nav class="sidenav" [class.open]="menuOpen()">
+      <a
+        *ngFor="let link of navLinks"
+        [routerLink]="link.path"
+        routerLinkActive="active"
+        (click)="closeMenu()"
+        >{{ link.label }}</a
+      >
+    </nav>
+
+    <div class="scrim" *ngIf="menuOpen()" (click)="closeMenu()"></div>
+
+    <main class="content">
+      <router-outlet></router-outlet>
+    </main>
+  </div>
+</div>

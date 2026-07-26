@@ -1,0 +1,52 @@
+<h1>Trade History</h1>
+
+<div class="error-banner" *ngIf="error()">{{ error() }}</div>
+
+<div class="card">
+  <div class="table-wrap" *ngIf="trades().length; else empty">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Side</th>
+          <th>Qty</th>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>SL / Target</th>
+          <th>P&amp;L</th>
+          <th>Confidence</th>
+          <th>Strategy Votes</th>
+          <th>Entry Time</th>
+          <th>Exit Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let trade of trades()">
+          <td>{{ trade.symbol }}</td>
+          <td>
+            <span class="badge" [class.buy]="trade.side === 'BUY'" [class.sell]="trade.side === 'SELL'">
+              {{ trade.side }}
+            </span>
+          </td>
+          <td>{{ trade.quantity }}</td>
+          <td>{{ trade.entry_price | number: '1.2-2' }}</td>
+          <td>{{ trade.exit_price | number: '1.2-2' }}</td>
+          <td>
+            {{ trade.stop_loss_price ? (trade.stop_loss_price | number: '1.2-2') : '—' }} /
+            {{ trade.target_price ? (trade.target_price | number: '1.2-2') : '—' }}
+          </td>
+          <td [class.pnl-positive]="trade.pnl >= 0" [class.pnl-negative]="trade.pnl < 0">
+            {{ trade.pnl | number: '1.2-2' }}
+          </td>
+          <td>{{ trade.metadata?.confidence ?? '—' }}</td>
+          <td>{{ trade.metadata?.agreeing_strategies?.join(', ') || '—' }}</td>
+          <td>{{ trade.entry_timestamp | date: 'short' }}</td>
+          <td>{{ trade.exit_timestamp | date: 'short' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #empty>
+    <div class="empty-state">No closed trades yet</div>
+  </ng-template>
+</div>

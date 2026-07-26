@@ -1,0 +1,77 @@
+<h1>Portfolio</h1>
+
+<div class="error-banner" *ngIf="error()">{{ error() }}</div>
+
+<div class="grid grid-cols-auto" *ngIf="portfolio() as p">
+  <div class="card">
+    <div class="label">Cash</div>
+    <div class="value">₹{{ p.cash | number: '1.2-2' }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Available Cash</div>
+    <div class="value">₹{{ p.available_cash | number: '1.2-2' }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Used Capital</div>
+    <div class="value">₹{{ p.used_capital | number: '1.2-2' }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Initial Capital</div>
+    <div class="value">₹{{ p.initial_capital | number: '1.2-2' }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Equity</div>
+    <div class="value">₹{{ p.equity | number: '1.2-2' }}</div>
+  </div>
+  <div class="card">
+    <div class="label">Realized P&amp;L</div>
+    <div class="value" [class.pnl-positive]="p.realized_pnl >= 0" [class.pnl-negative]="p.realized_pnl < 0">
+      ₹{{ p.realized_pnl | number: '1.2-2' }}
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Unrealized P&amp;L</div>
+    <div class="value" [class.pnl-positive]="p.unrealized_pnl >= 0" [class.pnl-negative]="p.unrealized_pnl < 0">
+      ₹{{ p.unrealized_pnl | number: '1.2-2' }}
+    </div>
+  </div>
+  <div class="card">
+    <div class="label">Total P&amp;L</div>
+    <div class="value" [class.pnl-positive]="p.total_pnl >= 0" [class.pnl-negative]="p.total_pnl < 0">
+      ₹{{ p.total_pnl | number: '1.2-2' }}
+    </div>
+  </div>
+</div>
+
+<div class="card table-section" *ngIf="portfolio() as p">
+  <h3>Open Positions ({{ p.positions.length }})</h3>
+  <div class="table-wrap" *ngIf="p.positions.length; else noPositions">
+    <table>
+      <thead>
+        <tr>
+          <th>Symbol</th>
+          <th>Exchange</th>
+          <th>Qty</th>
+          <th>Avg Price</th>
+          <th>Last Price</th>
+          <th>Unrealized P&amp;L</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let pos of p.positions">
+          <td>{{ pos.symbol }}</td>
+          <td>{{ pos.exchange }}</td>
+          <td>{{ pos.quantity }}</td>
+          <td>{{ pos.average_price | number: '1.2-2' }}</td>
+          <td>{{ pos.last_price | number: '1.2-2' }}</td>
+          <td [class.pnl-positive]="pos.unrealized_pnl >= 0" [class.pnl-negative]="pos.unrealized_pnl < 0">
+            {{ pos.unrealized_pnl | number: '1.2-2' }}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #noPositions>
+    <div class="empty-state">No open positions</div>
+  </ng-template>
+</div>

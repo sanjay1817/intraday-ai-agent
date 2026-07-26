@@ -1,0 +1,37 @@
+<div class="controls">
+  <span class="status" [class.on]="running()">{{ running() ? 'AUTO: RUNNING' : 'AUTO: STOPPED' }}</span>
+
+  <button class="btn" [disabled]="busy() || running()" (click)="startAutoTrading()">
+    Start Auto Trading
+  </button>
+  <button class="btn secondary" [disabled]="busy() || !running()" (click)="stopAutoTrading()">
+    Stop Auto Trading
+  </button>
+  <button class="btn danger" [disabled]="busy()" (click)="confirmEmergencyStop()">
+    Emergency Stop
+  </button>
+  <button class="btn secondary" [disabled]="busy()" (click)="confirmReset()">
+    Reset Portfolio
+  </button>
+
+  <span class="toast ok" *ngIf="lastMessage()">{{ lastMessage() }}</span>
+  <span class="toast err" *ngIf="lastError()">{{ lastError() }}</span>
+</div>
+
+<app-confirm-dialog
+  [open]="pending() === 'emergency-stop'"
+  title="Emergency Stop"
+  message="This immediately flattens every open paper position at the current market price and stops auto trading. Continue?"
+  confirmLabel="Emergency Stop"
+  (confirmed)="runConfirmedAction()"
+  (cancelled)="cancelConfirm()"
+></app-confirm-dialog>
+
+<app-confirm-dialog
+  [open]="pending() === 'reset'"
+  title="Reset Paper Portfolio"
+  message="This clears every order, position, and trade history record and restores starting cash. Continue?"
+  confirmLabel="Reset Portfolio"
+  (confirmed)="runConfirmedAction()"
+  (cancelled)="cancelConfirm()"
+></app-confirm-dialog>

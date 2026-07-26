@@ -1,0 +1,18 @@
+<div class="chart" *ngIf="!isEmpty(); else empty">
+  <svg [attr.viewBox]="viewBox()" preserveAspectRatio="none" [style.height.px]="height">
+    <rect
+      *ngFor="let bar of bars()"
+      [attr.x]="bar.x"
+      [attr.y]="bar.y"
+      [attr.width]="bar.width"
+      [attr.height]="bar.height"
+      [attr.fill]="bar.color"
+      rx="1.5"
+    >
+      <title>{{ bar.label }}: {{ bar.value | number: '1.0-2' }}</title>
+    </rect>
+  </svg>
+</div>
+<ng-template #empty>
+  <div class="empty-state">No data yet</div>
+</ng-template>

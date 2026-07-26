@@ -1,0 +1,52 @@
+<h1>Orders</h1>
+
+<div class="error-banner" *ngIf="error()">{{ error() }}</div>
+
+<div class="card">
+  <div class="table-wrap" *ngIf="orders().length; else empty">
+    <table>
+      <thead>
+        <tr>
+          <th>Order ID</th>
+          <th>Symbol</th>
+          <th>Side</th>
+          <th>Type</th>
+          <th>Qty</th>
+          <th>Filled</th>
+          <th>Avg Fill Price</th>
+          <th>Status</th>
+          <th>SL / Target</th>
+          <th>Confidence</th>
+          <th>Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let order of orders()">
+          <td class="mono">{{ order.order_id.slice(0, 8) }}</td>
+          <td>{{ order.symbol }}</td>
+          <td>
+            <span class="badge" [class.buy]="order.side === 'BUY'" [class.sell]="order.side === 'SELL'">
+              {{ order.side }}
+            </span>
+          </td>
+          <td>{{ order.order_type }}</td>
+          <td>{{ order.quantity }}</td>
+          <td>{{ order.filled_quantity }}</td>
+          <td>{{ order.average_fill_price ? (order.average_fill_price | number: '1.2-2') : '—' }}</td>
+          <td>
+            <span class="badge">{{ order.status }}</span>
+          </td>
+          <td>
+            {{ order.stop_loss_price ? (order.stop_loss_price | number: '1.2-2') : '—' }} /
+            {{ order.target_price ? (order.target_price | number: '1.2-2') : '—' }}
+          </td>
+          <td>{{ order.metadata?.confidence ?? '—' }}</td>
+          <td>{{ order.created_at | date: 'short' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #empty>
+    <div class="empty-state">No orders yet</div>
+  </ng-template>
+</div>

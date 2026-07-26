@@ -1,0 +1,41 @@
+<h1>AI Signals</h1>
+
+<div class="error-banner" *ngIf="error()">{{ error() }}</div>
+
+<p class="hint" *ngIf="symbols().length === 0">
+  No symbols configured (see <code>AUTO_SYMBOLS</code>) — nothing to show a live signal for.
+</p>
+
+<div class="grid grid-cols-auto" *ngIf="symbols().length">
+  <div class="card" *ngFor="let row of rows()">
+    <div class="row-head">
+      <span class="symbol">{{ row.symbol }}</span>
+      <span
+        class="badge"
+        *ngIf="row.recommendation as rec"
+        [class.buy]="rec.action === 'BUY'"
+        [class.sell]="rec.action === 'SELL'"
+        [class.hold]="rec.action === 'HOLD'"
+      >
+        {{ rec.action }}
+      </span>
+    </div>
+
+    <ng-container *ngIf="row.recommendation as rec; else unavailable">
+      <div class="metric">
+        Confidence: <strong>{{ rec.confidence | number: '1.0-1' }}%</strong>
+        ({{ rec.confirmation_count }}/{{ rec.total_strategy_count }} strategies)
+      </div>
+      <div class="metric" *ngIf="rec.entry">Entry: {{ rec.entry | number: '1.2-2' }}</div>
+      <div class="metric" *ngIf="rec.stop_loss">Stop Loss: {{ rec.stop_loss | number: '1.2-2' }}</div>
+      <div class="metric" *ngIf="rec.targets.length">Targets: {{ rec.targets.join(', ') }}</div>
+      <p class="reasoning">{{ rec.reasoning }}</p>
+      <ul class="warnings" *ngIf="rec.warnings.length">
+        <li *ngFor="let warning of rec.warnings">{{ warning }}</li>
+      </ul>
+    </ng-container>
+    <ng-template #unavailable>
+      <div class="empty-state">Signal unavailable (broker/data error)</div>
+    </ng-template>
+  </div>
+</div>
