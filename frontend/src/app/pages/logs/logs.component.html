@@ -1,0 +1,48 @@
+<h1>Logs</h1>
+
+<div class="error-banner" *ngIf="error()">{{ error() }}</div>
+
+<div class="filters">
+  <button
+    *ngFor="let level of levels"
+    class="btn secondary"
+    [class.active]="levelFilter() === level"
+    (click)="setFilter(level)"
+  >
+    {{ level }}
+  </button>
+</div>
+
+<div class="card log-panel">
+  <div class="table-wrap" *ngIf="filtered().length; else empty">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Level</th>
+          <th>Logger</th>
+          <th>Message</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let entry of filtered()">
+          <td>{{ entry.timestamp | date: 'HH:mm:ss.SSS' }}</td>
+          <td>
+            <span
+              class="badge"
+              [class.sell]="entry.level === 'ERROR' || entry.level === 'CRITICAL'"
+              [class.hold]="entry.level === 'WARNING'"
+            >
+              {{ entry.level }}
+            </span>
+          </td>
+          <td class="mono">{{ entry.logger }}</td>
+          <td class="message">{{ entry.message }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #empty>
+    <div class="empty-state">No log entries</div>
+  </ng-template>
+</div>
