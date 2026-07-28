@@ -257,3 +257,29 @@ async def test_close_does_not_close_injected_client(tmp_path: Path) -> None:
 
     assert not client.is_closed
     await client.aclose()
+
+
+# -- rows() ---------------------------------------------------------------------------
+
+
+async def test_rows_returns_raw_downloaded_rows(tmp_path: Path) -> None:
+    master = make_master(ok_handler, tmp_path)
+
+    rows = await master.rows()
+
+    assert rows == _SAMPLE_ROWS
+
+
+async def test_rows_and_resolve_share_a_single_download(tmp_path: Path) -> None:
+    calls = {"n": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(200, json=_SAMPLE_ROWS)
+
+    master = make_master(handler, tmp_path)
+
+    await master.rows()
+    await master.resolve(Exchange.NSE, "SBIN-EQ")
+
+    assert calls["n"] == 1

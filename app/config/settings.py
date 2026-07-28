@@ -166,6 +166,65 @@ class Settings(BaseSettings):
     max_daily_trades: int = Field(default=10, gt=0)
     max_daily_loss: float = Field(default=5000.0, gt=0)
 
+    #: Reserved for a future phase that actually routes orders through
+    #: options (`app.options`). Phase 1 (option-chain fetch/cache/expiry
+    #: /strike selection only) never reads this to change any existing
+    #: behavior — it exists now so later phases don't need a settings
+    #: migration to introduce it.
+    trading_mode: Literal["EQUITY", "OPTIONS"] = "EQUITY"
+
+    #: Underlyings `app.options.OptionChainService` is configured to serve
+    #: option chains for, e.g. `OPTION_UNDERLYINGS=["NIFTY","BANKNIFTY"]`
+    #: (a JSON array, same format as `auto_symbols` above). Defaults to
+    #: the three most liquid NSE index-option underlyings.
+    option_underlyings: list[str] = Field(
+        default_factory=lambda: ["NIFTY", "BANKNIFTY", "FINNIFTY"]
+    )
+
+    #: Default `app.options.models.StrikeMode` `app.options.StrikeSelector`
+    #: applies when a caller doesn't specify one explicitly.
+    option_strike_mode: Literal["ATM", "ITM", "OTM"] = "ATM"
+
+    #: Default `app.options.models.ExpiryMode` `app.options.ExpirySelector`
+    #: applies when a caller doesn't specify one explicitly.
+    option_expiry_mode: Literal["NEAREST_WEEKLY", "NEXT_WEEKLY", "MONTHLY"] = "NEAREST_WEEKLY"
+
+    #: How long `app.options.OptionChainService` treats a cached option
+    #: chain as fresh before re-fetching from the broker. 30s balances
+    #: staleness against re-filtering the (already locally cached) scrip
+    #: master on every call during a burst of requests.
+    option_chain_refresh_seconds: float = Field(default=30.0, gt=0)
+
+    #: Fallback lot size `app.options.lot_sizing.resolve_lot_size` uses
+    #: only when the resolved `OptionInstrument.lot_size` from the live
+    #: chain is unavailable (`None`). The chain's own value — Angel One
+    #: scrip-master `lotsize`, ground truth from the broker's own
+    #: instrument master — is always preferred when present; this is a
+    #: documented last resort, not a broker-specific override.
+    option_default_lot_size: int = Field(default=50, gt=0)
+
+    #: Maximum lots a single Phase 3 paper option order may request —
+    #: enforced by `app.options.risk.OptionRiskManager.check_order_allowed`.
+    option_max_lots_per_order: int = Field(default=10, gt=0)
+
+    #: Maximum premium value (`quantity * premium`) a single Phase 3
+    #: paper option order may commit — enforced by
+    #: `app.options.risk.OptionRiskManager.check_order_allowed`.
+    option_max_premium_per_order: float = Field(default=50_000.0, gt=0)
+
+    #: Maximum total premium value across every open option position
+    #: (existing exposure plus the candidate order) Phase 3 paper option
+    #: trading may carry at once — enforced by
+    #: `app.options.risk.OptionRiskManager.check_order_allowed`.
+    option_max_premium_exposure: float = Field(default=200_000.0, gt=0)
+
+    #: Maximum realized option P&L loss for one IST trading day before
+    #: `app.options.risk.OptionRiskManager` locks out further entries —
+    #: independent of `max_daily_loss` above, which is
+    #: `app.auto.risk.AutoRiskManager`'s equivalent for Auto Trading
+    #: equity strategies, not shared with Phase 3 options.
+    option_max_daily_loss: float = Field(default=10_000.0, gt=0)
+
     broker: BrokerSettings = BrokerSettings()
 
     @field_validator("paper_market_data_broker")
@@ -176,6 +235,19 @@ class Settings(BaseSettings):
                 "paper_market_data_broker cannot be 'paper' itself — it must name a real "
                 "broker (angel_one, upstox, zerodha) for PaperBroker to source prices from"
             )
+        return value
+
+    @field_validator("trading_mode", mode="before")
+    @classmethod
+    def _uppercase_trading_mode(cls, value: object) -> object:
+        """Accept `TRADING_MODE=equity`/`TRADING_MODE=options` (lowercase,
+        as the Phase 2 docs/examples use) in addition to the `Literal`'s
+        canonical uppercase values — additive, and the default (`"EQUITY"`)
+        and every existing all-uppercase usage are unaffected.
+        """
+
+        if isinstance(value, str):
+            return value.upper()
         return value
 
 

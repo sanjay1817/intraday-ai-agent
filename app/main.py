@@ -27,15 +27,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.v1.routers.auto import router as auto_router
 from app.api.v1.routers.health import router as health_router
 from app.api.v1.routers.logs import router as logs_router
+from app.api.v1.routers.options import router as options_router
 from app.api.v1.routers.paper import router as paper_router
 from app.api.v1.routers.signals import router as signals_router
 from app.auto.models import AutoTradingConfig
 from app.auto.orchestrator import AutoTradingOrchestrator
 from app.brokers.angel_one import AngelOneAdapter
+from app.brokers.angel_one_instruments import AngelOneInstrumentMaster
 from app.brokers.factory import get_broker_adapter
 from app.config.settings import get_settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging
+from app.options.option_chain_service import AngelOneOptionInstrumentSource, OptionChainService
+from app.options.risk import OptionRiskManager
 from app.paper.broker import PaperBroker
 from app.paper.engine import PaperTradingEngine
 
@@ -133,6 +137,48 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     if settings.auto_trading_enabled:
         await app.state.auto_orchestrator.start()
 
+    # Options infrastructure (Phase 1 — see app/options and
+    # docs/OPTIONS_PHASE1.md): only constructed when the resolved broker
+    # (or, for PaperBroker, its wrapped market-data broker) is Angel One,
+    # since `AngelOneOptionInstrumentSource` is the only
+    # `OptionInstrumentSource` implemented so far. Left `None` for every
+    # other broker configuration so this never breaks a Zerodha/Upstox
+    # deployment. Reuses `login_target.instrument_master` (the adapter's
+    # own `AngelOneInstrumentMaster`) rather than constructing a second
+    # one, so the scrip master is downloaded/cached at most once. No
+    # eager fetch and no background task — construction alone does no I/O.
+    app.state.option_chain_service = None
+    if isinstance(login_target, AngelOneAdapter):
+        instrument_master = login_target.instrument_master
+        if isinstance(instrument_master, AngelOneInstrumentMaster):
+            app.state.option_chain_service = OptionChainService(
+                underlyings=settings.option_underlyings,
+                refresh_seconds=settings.option_chain_refresh_seconds,
+                source=AngelOneOptionInstrumentSource(instrument_master),
+            )
+        else:
+            logger.debug("option_chain_service_skipped_non_real_instrument_master")
+    else:
+        logger.debug("option_chain_service_skipped_non_angel_one_broker")
+
+    # Phase 3 (see app/options/risk.py, app/options/paper_trading.py and
+    # docs/OPTIONS_PHASE3.md): constructed under the exact same condition
+    # as `option_chain_service` above — option paper trading has no
+    # usable premium/chain source without one, so there is nothing
+    # useful for this gate to guard when the resolved broker isn't Angel
+    # One. `None` in every other broker configuration, mirroring
+    # `option_chain_service` exactly.
+    app.state.option_risk_manager = (
+        OptionRiskManager(
+            max_lots_per_order=settings.option_max_lots_per_order,
+            max_premium_per_order=settings.option_max_premium_per_order,
+            max_premium_exposure=settings.option_max_premium_exposure,
+            max_daily_loss=settings.option_max_daily_loss,
+        )
+        if app.state.option_chain_service is not None
+        else None
+    )
+
     # Future startup steps (database engine connect, Redis client
     # connect, scheduler start, websocket manager start) belong here, in
     # dependency order, before `app.state.ready` is set.
@@ -194,6 +240,7 @@ def create_app() -> FastAPI:
     app.include_router(paper_router)
     app.include_router(auto_router)
     app.include_router(logs_router)
+    app.include_router(options_router)
 
     return app
 

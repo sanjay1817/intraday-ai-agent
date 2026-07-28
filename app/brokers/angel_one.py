@@ -262,6 +262,22 @@ class AngelOneAdapter(BaseBrokerAdapter):
         #: auth. Tests inject a trivial fake instead (see `SymbolResolver`).
         self._instruments: SymbolResolver = instrument_resolver or AngelOneInstrumentMaster()
 
+    @property
+    def instrument_master(self) -> SymbolResolver:
+        """The instrument resolver this adapter was constructed with.
+
+        Exposed so other infrastructure that needs Angel One's raw
+        scrip-master rows (e.g. `app.options.option_chain_service
+        .AngelOneOptionInstrumentSource`) can reuse this adapter's
+        existing resolver/cache instead of constructing a second one.
+        Typed as `SymbolResolver` (not the concrete
+        `AngelOneInstrumentMaster`) because tests may inject a trivial
+        fake here too — callers needing the concrete type's extra
+        methods (e.g. `.rows()`) should `isinstance`-check first.
+        """
+
+        return self._instruments
+
     async def _resolve_token(self, exchange: Exchange, tradingsymbol: str) -> str:
         """Resolve `tradingsymbol` to Angel One's numeric `symboltoken`.
 

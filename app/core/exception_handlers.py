@@ -55,6 +55,20 @@ from app.domain.exceptions.paper import (
     OrderNotFoundError,
 )
 from app.domain.exceptions.research import UnknownRunError
+from app.options.exceptions import (
+    ExpiryNotFoundError,
+    InvalidLotQuantityError,
+    InvalidOptionChainDataError,
+    OptionChainFetchError,
+    OptionPositionNotFoundError,
+    OptionRiskLimitExceededError,
+    OptionsError,
+    OptionsInfrastructureUnavailableError,
+    PremiumUnavailableError,
+    StrikeNotFoundError,
+    TradingModeNotEnabledError,
+    UnsupportedUnderlyingError,
+)
 
 logger = get_logger(__name__)
 
@@ -78,6 +92,18 @@ _STATUS_CODE_BY_EXCEPTION: tuple[tuple[type[Exception], int], ...] = (
     (InvalidOrderStateError, 409),  # the paper order isn't in a cancellable/modifiable state
     (InsufficientCashError, 422),  # well-formed request, not enough paper capital to satisfy it
     (PaperTradingError, 400),  # paper trading engine failed generically
+    (TradingModeNotEnabledError, 400),  # options endpoint called without TRADING_MODE=OPTIONS
+    (UnsupportedUnderlyingError, 400),  # requested underlying isn't in the configured set
+    (ExpiryNotFoundError, 404),  # no expiry available/matching the requested mode
+    (StrikeNotFoundError, 404),  # no strike available for the request
+    (PremiumUnavailableError, 502),  # broker LTP lookup for the selected contract failed
+    (OptionsInfrastructureUnavailableError, 503),  # no OptionChainService configured (non-Angel-One broker)
+    (InvalidOptionChainDataError, 502),  # chain data parsed to empty/nonsensical
+    (OptionChainFetchError, 503),  # broker chain fetch failed (network/API)
+    (OptionPositionNotFoundError, 404),  # no open option position to exit
+    (InvalidLotQuantityError, 400),  # malformed lots request
+    (OptionRiskLimitExceededError, 422),  # well-formed request, rejected by an options risk limit
+    (OptionsError, 400),  # options integration failed generically
 )
 
 
@@ -165,8 +191,8 @@ def register_exception_handlers(app: FastAPI) -> None:
 
     Registering against each family's base class (`BrokerError`,
     `IndicatorError`, `ResearchError`, `MarketDataError`,
-    `PaperTradingError`) is sufficient for every present and future
-    subclass — see this module's docstring for why.
+    `PaperTradingError`, `OptionsError`) is sufficient for every present
+    and future subclass — see this module's docstring for why.
     """
 
     app.add_exception_handler(BrokerError, _handle_domain_error)
@@ -174,4 +200,5 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ResearchError, _handle_domain_error)
     app.add_exception_handler(MarketDataError, _handle_domain_error)
     app.add_exception_handler(PaperTradingError, _handle_domain_error)
+    app.add_exception_handler(OptionsError, _handle_domain_error)
     app.add_exception_handler(Exception, _handle_unexpected_error)

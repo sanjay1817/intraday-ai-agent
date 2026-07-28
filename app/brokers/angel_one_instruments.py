@@ -101,6 +101,7 @@ class AngelOneInstrumentMaster:
         self._cache_path = cache_path
         self._ttl_seconds = ttl_seconds
         self._index: dict[tuple[str, str], str] | None = None
+        self._rows: list[dict[str, Any]] | None = None
         self._load_lock = asyncio.Lock()
 
     async def resolve(self, exchange: Exchange, tradingsymbol: str) -> str:
@@ -127,6 +128,29 @@ class AngelOneInstrumentMaster:
             )
         return token
 
+    async def rows(self) -> list[dict[str, Any]]:
+        """Return the raw downloaded/cached instrument-master row list.
+
+        Additive to the `(exchange, symbol) -> token` index `resolve()`
+        uses: callers that need fields the index doesn't carry (e.g.
+        `expiry`/`strike`/`instrumenttype` for options — see
+        `app.options.option_chain_service.AngelOneOptionInstrumentSource`)
+        get them from here instead of a second, independent download.
+        Shares this instance's cache-read/download/lock logic with
+        `resolve()`'s index build, so the scrip master is fetched at most
+        once per TTL window regardless of which caller asks first.
+
+        Raises the same exceptions as `resolve()`'s underlying fetch:
+
+        Raises:
+            BrokerConnectionError: the instrument master couldn't be
+                downloaded (network failure) and no usable cache exists.
+            BrokerAPIError: the instrument master download itself failed
+                (non-2xx response or an unexpected body shape).
+        """
+
+        return await self._get_rows()
+
     async def close(self) -> None:
         """Close the owned HTTP client, if this instance created one itself."""
 
@@ -134,16 +158,33 @@ class AngelOneInstrumentMaster:
             await self._client.aclose()
 
     async def _get_index(self) -> dict[tuple[str, str], str]:
+        if self._index is not None:
+            return self._index
         async with self._load_lock:
             if self._index is not None:
                 return self._index
-            raw = self._read_cache()
-            if raw is None:
-                raw = await self._download()
-                self._write_cache(raw)
+            raw = await self._get_rows_locked()
             self._index = self._build_index(raw)
             logger.info("angel_one_instrument_master_indexed", instrument_count=len(self._index))
             return self._index
+
+    async def _get_rows(self) -> list[dict[str, Any]]:
+        if self._rows is not None:
+            return self._rows
+        async with self._load_lock:
+            return await self._get_rows_locked()
+
+    async def _get_rows_locked(self) -> list[dict[str, Any]]:
+        """Return the cached/downloaded raw rows. Caller must hold `_load_lock`."""
+
+        if self._rows is not None:
+            return self._rows
+        raw = self._read_cache()
+        if raw is None:
+            raw = await self._download()
+            self._write_cache(raw)
+        self._rows = raw
+        return self._rows
 
     def _read_cache(self) -> list[dict[str, Any]] | None:
         if not self._cache_path.exists():
