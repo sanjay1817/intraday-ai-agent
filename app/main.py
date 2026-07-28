@@ -31,6 +31,7 @@ from app.api.v1.routers.paper import router as paper_router
 from app.api.v1.routers.signals import router as signals_router
 from app.auto.models import AutoTradingConfig
 from app.auto.orchestrator import AutoTradingOrchestrator
+from app.brokers.angel_one import AngelOneAdapter
 from app.brokers.factory import get_broker_adapter
 from app.config.settings import get_settings
 from app.core.exception_handlers import register_exception_handlers
@@ -67,16 +68,38 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     logger.info("application_starting", app_name=settings.app_name, app_env=settings.app_env)
 
-    # Constructed, not logged in: Zerodha's `request_token` and Upstox's
-    # `auth_code` are each single-use, obtained through that broker's own
-    # out-of-band browser login redirect — calling `login()` automatically
-    # here (or automatically per-request) would burn a one-time credential
-    # on every restart, or on the second Signal API call, respectively.
-    # Authenticating this adapter is an operator responsibility for this
-    # milestone; `historical_data()` fails with a clean, correctly-mapped
-    # `BrokerAPIError` if it's called before that's done.
+    # Constructed, not logged in by default: Zerodha's `request_token` and
+    # Upstox's `auth_code` are each single-use, obtained through that
+    # broker's own out-of-band browser login redirect — calling `login()`
+    # automatically here (or automatically per-request) would burn a
+    # one-time credential on every restart, or on the second Signal API
+    # call, respectively. Authenticating those adapters remains an operator
+    # responsibility; `historical_data()` fails with a clean,
+    # correctly-mapped `BrokerAPIError` if it's called before that's done.
     broker = get_broker_adapter(settings.default_broker, settings)
     app.state.broker = broker
+
+    # Angel One is the one exception: SmartAPI's password+TOTP login is
+    # fully programmatic and safely repeatable (unlike Zerodha/Upstox's
+    # single-use browser tokens above), so it's safe to log it in
+    # automatically here when `AUTO_LOGIN_ON_STARTUP=true` — which matters
+    # for a long-running deployment (e.g. on AWS) where nothing else would
+    # ever call `login()`. `PaperBroker.login()` delegates to its wrapped
+    # market-data broker, so this also covers `DEFAULT_BROKER=paper` with
+    # `PAPER_MARKET_DATA_BROKER=angel_one`. Any other resolved broker is
+    # left untouched regardless of the flag, and a login failure (bad
+    # credentials, network issue) is logged but does not prevent startup —
+    # the same `BrokerAuthenticationError` `historical_data()` would have
+    # raised anyway just surfaces on first use instead.
+    login_target = broker.market_data_broker if isinstance(broker, PaperBroker) else broker
+    if settings.auto_login_on_startup and isinstance(login_target, AngelOneAdapter):
+        try:
+            await broker.login()
+            logger.info("broker_auto_login_succeeded", broker=login_target.broker_name.value)
+        except Exception:
+            logger.exception(
+                "broker_auto_login_failed", broker=login_target.broker_name.value
+            )
 
     # The Paper Trading Engine is always available, independent of
     # DEFAULT_BROKER: if `broker` already IS a `PaperBroker` (DEFAULT_BROKER

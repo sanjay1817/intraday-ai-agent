@@ -103,15 +103,17 @@ class Settings(BaseSettings):
 
     #: Which configured broker (see `broker` below) `app.brokers.factory
     #: .get_broker_adapter` constructs when a caller (e.g. the Signal API)
-    #: doesn't specify one explicitly. Defaults to Zerodha only because
-    #: all three adapters are equally complete and this pins *some*
-    #: default rather than leaving the choice ambiguous; any existing
-    #: environment that never set this continues to work unchanged, and
-    #: overriding it (`DEFAULT_BROKER=upstox`) requires no code change.
-    #: An unrecognized value fails fast with a clear Pydantic validation
-    #: error naming every valid `BrokerName` member, the same way every
-    #: other enum-typed setting in this codebase already validates.
-    default_broker: BrokerName = BrokerName.ZERODHA
+    #: doesn't specify one explicitly. Defaults to Angel One — the only
+    #: broker this codebase can authenticate programmatically end-to-end
+    #: (password + TOTP, no browser redirect — see `AngelOneAdapter.login`)
+    #: and the only one this project has live-verified (see
+    #: `paper_market_data_broker` below, which has always defaulted to it
+    #: for the same reason). Overriding it (`DEFAULT_BROKER=zerodha`)
+    #: requires no code change. An unrecognized value fails fast with a
+    #: clear Pydantic validation error naming every valid `BrokerName`
+    #: member, the same way every other enum-typed setting in this
+    #: codebase already validates.
+    default_broker: BrokerName = BrokerName.ANGEL_ONE
 
     #: Which *real* broker `app.paper.broker.PaperBroker` delegates market
     #: data (`ltp`/`historical_data`/`start_websocket`) to — paper trading
@@ -120,6 +122,23 @@ class Settings(BaseSettings):
     #: for its own market data", which would be circular. Defaults to
     #: Angel One since it's this project's only live-verified broker.
     paper_market_data_broker: BrokerName = BrokerName.ANGEL_ONE
+
+    #: Whether `app.main`'s lifespan calls `login()` on the constructed
+    #: broker automatically at startup. Defaults to `False` because for
+    #: Zerodha/Upstox that would be actively harmful — their `request_token`
+    #: /`auth_code` are single-use, obtained through a manual browser
+    #: redirect, and would be burned on every process restart (see
+    #: `app.main.lifespan`'s docstring). It is safe to enable
+    #: (`AUTO_LOGIN_ON_STARTUP=true`) when the resolved broker is Angel
+    #: One (directly via `DEFAULT_BROKER=angel_one`, or indirectly via
+    #: `DEFAULT_BROKER=paper` + `PAPER_MARKET_DATA_BROKER=angel_one`)
+    #: since SmartAPI's password+TOTP login is fully programmatic and
+    #: repeatable — see `AngelOneAdapter.login`. `app.main` only attempts
+    #: the auto-login when the resolved broker actually is Angel One,
+    #: regardless of this flag, so turning it on against a
+    #: Zerodha/Upstox-configured environment is a no-op rather than a
+    #: credential-burning surprise.
+    auto_login_on_startup: bool = False
 
     #: Starting cash for `app.paper.engine.PaperTradingEngine`, both the
     #: instance `app.main`'s lifespan constructs at `app.state.paper_engine`

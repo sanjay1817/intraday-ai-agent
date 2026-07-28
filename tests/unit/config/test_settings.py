@@ -10,10 +10,10 @@ from app.config.settings import Settings, get_settings
 from app.domain.enums.trading import BrokerName
 
 
-def test_default_broker_defaults_to_zerodha_when_unset() -> None:
+def test_default_broker_defaults_to_angel_one_when_unset() -> None:
     settings = Settings(_env_file=None)
 
-    assert settings.default_broker is BrokerName.ZERODHA
+    assert settings.default_broker is BrokerName.ANGEL_ONE
 
 
 def test_default_broker_is_overridable_via_constructor() -> None:
@@ -55,7 +55,7 @@ def test_existing_environment_without_default_broker_still_constructs_successful
     settings = Settings(_env_file=None)
 
     assert settings.app_name == "Intraday Trading Agent"
-    assert settings.default_broker is BrokerName.ZERODHA
+    assert settings.default_broker is BrokerName.ANGEL_ONE
     assert settings.broker.zerodha.base_url == "https://api.kite.trade"
 
 
