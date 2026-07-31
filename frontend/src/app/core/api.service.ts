@@ -24,7 +24,7 @@ import {
 // backend (see `app.main.create_app`'s CORS middleware, added
 // specifically for this) -- `localhost:8000` is `uvicorn`'s default.
 const API_ROOT = 'http://localhost:8000';
-const API_BASE = `${API_ROOT}/api/v1`;
+const API_BASE = `/api/v1`;
 
 export interface PlaceOrderRequest {
   order: {
