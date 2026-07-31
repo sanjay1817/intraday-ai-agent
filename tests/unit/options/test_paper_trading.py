@@ -22,6 +22,7 @@ from app.options.option_chain_service import OptionChainService
 from app.options.paper_trading import (
     enter_option_position,
     exit_option_position,
+    get_option_premium_exposure,
     get_option_trade_history,
 )
 from app.options.risk import OptionRiskManager
@@ -539,6 +540,66 @@ async def test_trade_history_derives_underlying_and_enriches_metadata() -> None:
     assert entry.reason == "TARGET"
     assert entry.confidence == 80.0
     assert entry.holding_seconds == 0.0
+
+
+# -- get_option_premium_exposure --------------------------------------------------------------
+
+
+async def test_get_option_premium_exposure_sums_open_nfo_positions_only() -> None:
+    from app.domain.enums.trading import OrderSide
+    from app.paper.dto import PaperOrderRequest, PaperOrderType
+
+    broker = FakeBroker(ltp=100.0)
+    chain_service = _chain_service(
+        [
+            _instrument("NIFTY", 24000.0, OptionType.CE, lot_size=50),
+            _instrument("NIFTY", 24100.0, OptionType.CE, lot_size=50),
+        ]
+    )
+    engine = PaperTradingEngine(initial_capital=10_000_000.0)
+    risk_manager = _risk_manager()
+
+    assert await get_option_premium_exposure(engine) == 0.0
+
+    await enter_option_position(
+        broker=broker,
+        engine=engine,
+        option_chain_service=chain_service,
+        risk_manager=risk_manager,
+        recommendation=_recommendation(strike=24000.0),
+        lots=1,
+        default_lot_size=50,
+        max_lots_per_order=10,
+        now=_T0,
+    )
+    await enter_option_position(
+        broker=broker,
+        engine=engine,
+        option_chain_service=chain_service,
+        risk_manager=risk_manager,
+        recommendation=_recommendation(strike=24100.0),
+        lots=1,
+        default_lot_size=50,
+        max_lots_per_order=10,
+        now=_T0,
+    )
+
+    # 2 positions * 50 qty * 100 premium each = 10000
+    assert await get_option_premium_exposure(engine) == pytest.approx(10_000.0)
+
+    # An equity (NSE) position must not contribute.
+    await engine.place_order(
+        PaperOrderRequest(
+            symbol="INFY-EQ",
+            exchange=Exchange.NSE,
+            side=OrderSide.BUY,
+            order_type=PaperOrderType.MARKET,
+            quantity=10,
+        ),
+        current_price=1500.0,
+        now=_T0,
+    )
+    assert await get_option_premium_exposure(engine) == pytest.approx(10_000.0)
 
 
 async def test_trade_history_excludes_non_nfo_trades() -> None:

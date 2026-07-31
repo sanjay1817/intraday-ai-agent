@@ -146,3 +146,81 @@ export interface LogEntry {
   logger: string;
   message: string;
 }
+
+// -- options (Phase 1-4) -----------------------------------------------------------------
+// Mirrors `app/options/schemas.py`'s `OptionRecommendation`/
+// `OptionTradeHistoryEntry`/`OptionRiskStatus`, and `/health`'s Phase 4
+// additive fields (`app/api/v1/routers/health.py`).
+
+export type OptionSignal = 'BULLISH' | 'BEARISH' | 'NO_TRADE';
+export type OptionType = 'CE' | 'PE';
+
+export interface OptionRecommendation {
+  underlying: string;
+  signal: OptionSignal;
+  tradingsymbol: string | null;
+  expiry: string | null;
+  strike: number | null;
+  option_type: OptionType | null;
+  premium: number | null;
+  underlying_ltp: number;
+  confidence: number;
+  reasoning: string;
+  generated_at: string;
+}
+
+export interface OptionTradeHistoryEntry {
+  trade_id: string;
+  underlying: string;
+  tradingsymbol: string;
+  entry_premium: number;
+  exit_premium: number;
+  pnl: number;
+  holding_seconds: number;
+  reason: string | null;
+  confidence: number | null;
+  reasoning: string | null;
+  entry_timestamp: string;
+  exit_timestamp: string;
+}
+
+export interface OptionRiskStatus {
+  current_premium_exposure: number;
+  max_premium_exposure: number;
+  remaining_premium_capacity: number;
+  daily_realized_pnl: number;
+  max_daily_loss: number;
+  max_lots_per_order: number;
+  max_premium_per_order: number;
+}
+
+// -- auto options trading (Phase 5) -------------------------------------------------------
+// Mirrors `app/options/auto_trading.py`'s `AutoOptionsStatus`.
+
+export interface OptionAutoTradingStatus {
+  running: boolean;
+  started_at: string | null;
+  underlyings: string[];
+  cycle_count: number;
+  last_cycle_at: string | null;
+  last_scan_at: string | null;
+  next_scan_at: string | null;
+  last_action: string;
+  open_position_count: number;
+  trades_today: number;
+  daily_realized_pnl: number;
+  last_error: string | null;
+}
+
+export interface HealthResponse {
+  status: string;
+  app_name: string;
+  app_env: string;
+  uptime_seconds: number;
+  ready: boolean;
+  trading_mode: string;
+  default_broker: string;
+  options_infrastructure_available: boolean;
+  option_underlyings: string[];
+  option_default_lot_size: number;
+}

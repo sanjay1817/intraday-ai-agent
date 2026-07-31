@@ -7,9 +7,14 @@ import {
   ClosedTrade,
   EmergencyStopResponse,
   Exchange,
+  HealthResponse,
   HistoricalInterval,
   InstructorRecommendation,
   LogEntry,
+  OptionAutoTradingStatus,
+  OptionRecommendation,
+  OptionRiskStatus,
+  OptionTradeHistoryEntry,
   PaperOrder,
   PaperPosition,
   Portfolio
@@ -18,7 +23,8 @@ import {
 // The Angular dev server runs on a different origin than the FastAPI
 // backend (see `app.main.create_app`'s CORS middleware, added
 // specifically for this) -- `localhost:8000` is `uvicorn`'s default.
-const API_BASE = 'http://localhost:8000/api/v1';
+const API_ROOT = 'http://localhost:8000';
+const API_BASE = `${API_ROOT}/api/v1`;
 
 export interface PlaceOrderRequest {
   order: {
@@ -104,5 +110,42 @@ export class ApiService {
   getLogs(limit = 200): Observable<LogEntry[]> {
     const params = new HttpParams().set('limit', limit);
     return this.http.get<LogEntry[]>(`${API_BASE}/logs`, { params });
+  }
+
+  // -- health / options (Phase 4) ----------------------------------------------------------
+  // Display-only: no order-placement/exit methods live here on purpose --
+  // this phase's Options Dashboard reads state, it never places or
+  // exits a trade.
+
+  getHealth(): Observable<HealthResponse> {
+    // `/health` is mounted at the API root (no `/api/v1` prefix -- see
+    // `app.api.v1.routers.health`'s bare `APIRouter(tags=["health"])`
+    // and `app.main.create_app`'s `app.include_router(health_router)`),
+    // unlike every other endpoint this service calls.
+    return this.http.get<HealthResponse>(`${API_ROOT}/health`);
+  }
+
+  getOptionRecommendation(
+    underlying: string,
+    timeframe: HistoricalInterval = '5minute'
+  ): Observable<OptionRecommendation> {
+    const params = new HttpParams().set('underlying', underlying).set('timeframe', timeframe);
+    return this.http.get<OptionRecommendation>(`${API_BASE}/options/recommendation`, { params });
+  }
+
+  getOptionTrades(): Observable<OptionTradeHistoryEntry[]> {
+    return this.http.get<OptionTradeHistoryEntry[]>(`${API_BASE}/options/paper/trades`);
+  }
+
+  getOptionRiskStatus(): Observable<OptionRiskStatus> {
+    return this.http.get<OptionRiskStatus>(`${API_BASE}/options/risk/status`);
+  }
+
+  // -- auto options trading (Phase 5) ------------------------------------------------------
+  // Display-only here too: no start/stop methods -- the Options Dashboard's
+  // new section is read-only, matching Phase 4's own precedent for this page.
+
+  getOptionAutoStatus(): Observable<OptionAutoTradingStatus> {
+    return this.http.get<OptionAutoTradingStatus>(`${API_BASE}/options/auto/status`);
   }
 }

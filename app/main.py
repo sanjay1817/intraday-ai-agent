@@ -38,8 +38,12 @@ from app.brokers.factory import get_broker_adapter
 from app.config.settings import get_settings
 from app.core.exception_handlers import register_exception_handlers
 from app.core.logging import configure_logging
+from app.domain.enums.trading import HistoricalInterval
+from app.options.auto_trading import AutoOptionsConfig, AutoOptionsOrchestrator
+from app.options.models import ExpiryMode, StrikeMode
 from app.options.option_chain_service import AngelOneOptionInstrumentSource, OptionChainService
 from app.options.risk import OptionRiskManager
+from app.options.underlying_resolver import AngelOneUnderlyingResolver
 from app.paper.broker import PaperBroker
 from app.paper.engine import PaperTradingEngine
 
@@ -161,6 +165,22 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         logger.debug("option_chain_service_skipped_non_angel_one_broker")
 
+    # Bug fix (see docs/OPTIONS_PHASE2.md): constructed under the exact
+    # same condition as `option_chain_service` above, reusing the same
+    # `instrument_master` instance for the same reason (one scrip-master
+    # download/cache serves every lookup) — `AngelOneUnderlyingResolver`
+    # is the only `UnderlyingResolver` implemented so far. `None` in every
+    # other broker configuration, mirroring `option_chain_service` exactly.
+    app.state.underlying_resolver = None
+    if isinstance(login_target, AngelOneAdapter):
+        instrument_master = login_target.instrument_master
+        if isinstance(instrument_master, AngelOneInstrumentMaster):
+            app.state.underlying_resolver = AngelOneUnderlyingResolver(instrument_master)
+        else:
+            logger.debug("underlying_resolver_skipped_non_real_instrument_master")
+    else:
+        logger.debug("underlying_resolver_skipped_non_angel_one_broker")
+
     # Phase 3 (see app/options/risk.py, app/options/paper_trading.py and
     # docs/OPTIONS_PHASE3.md): constructed under the exact same condition
     # as `option_chain_service` above — option paper trading has no
@@ -179,6 +199,46 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         else None
     )
 
+    # Phase 5 (see app/options/auto_trading.py and docs/OPTIONS_PHASE5.md):
+    # constructed under the exact same condition as `option_chain_service`/
+    # `option_risk_manager` above — the automatic options scheduler has
+    # nothing to scan without a chain/risk gate. `None` in every other
+    # broker configuration, mirroring both exactly. `auto_options_enabled`
+    # only controls whether it *starts* automatically here; POST
+    # /api/v1/options/auto/start can start it at runtime either way,
+    # exactly like `auto_trading_enabled` does for the equity orchestrator.
+    app.state.auto_options_orchestrator = (
+        AutoOptionsOrchestrator(
+            broker=broker,
+            broker_name=settings.default_broker,
+            paper_engine=app.state.paper_engine,
+            option_chain_service=app.state.option_chain_service,
+            underlying_resolver=app.state.underlying_resolver,
+            risk_manager=app.state.option_risk_manager,
+            config=AutoOptionsConfig(
+                underlyings=settings.option_underlyings,
+                timeframe=HistoricalInterval.FIVE_MINUTE,
+                strike_mode=StrikeMode(settings.option_strike_mode),
+                expiry_mode=ExpiryMode(settings.option_expiry_mode),
+                confidence_threshold=settings.auto_option_confidence_threshold,
+                max_open_positions=settings.auto_max_open_option_positions,
+                lots_per_trade=settings.auto_option_lots_per_trade,
+                scan_interval_seconds=settings.auto_option_scan_interval_seconds,
+                exit_time=settings.auto_option_exit_time,
+                stop_loss_percent=settings.auto_option_stop_loss_percent,
+                target_percent=settings.auto_option_target_percent,
+            ),
+            default_lot_size=settings.option_default_lot_size,
+            max_lots_per_order=settings.option_max_lots_per_order,
+        )
+        if app.state.option_chain_service is not None
+        else None
+    )
+    if settings.auto_options_enabled and settings.trading_mode == "OPTIONS":
+        await app.state.auto_options_orchestrator.start()
+    else:
+        logger.debug("auto_options_orchestrator_not_started")
+
     # Future startup steps (database engine connect, Redis client
     # connect, scheduler start, websocket manager start) belong here, in
     # dependency order, before `app.state.ready` is set.
@@ -193,6 +253,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         logger.info("application_stopping")
 
         await app.state.auto_orchestrator.stop()
+        if app.state.auto_options_orchestrator is not None:
+            await app.state.auto_options_orchestrator.stop()
         await broker.close()
 
         # Future shutdown steps belong here, in the reverse order of the

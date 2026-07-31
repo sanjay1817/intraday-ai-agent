@@ -1,5 +1,36 @@
 # Options Trading — Phase 2: AI-Driven Option Recommendation
 
+> **Bug fix / correction:** This document originally described step 1
+> below as fetching candles for `underlying` directly, as the
+> `tradingsymbol`, on `Exchange.NSE`. That was wrong — Angel One's
+> historical-data API doesn't recognize `"NIFTY"`/`"BANKNIFTY"`/
+> `"FINNIFTY"` as trading symbols, so this failed with
+> `NoHistoricalDataError` for every underlying. The fix added a new
+> `UnderlyingResolver` seam (`app/options/underlying_resolver.py`) that
+> looks the underlying's own spot/index instrument up from the broker's
+> instrument master — the same way `AngelOneInstrumentMaster.resolve()`
+> already looks up equity `symboltoken`s, and the same way
+> `AngelOneOptionInstrumentSource` already looks up option contract rows
+> — instead of guessing the tradingsymbol. See the corrected step 1 below.
+>
+> **Second bug fix / correction:** once historical data worked, step 6
+> below built the option contract's own `tradingsymbol` with
+> `OptionSymbolBuilder` — a string-formatted reconstruction, previously
+> documented as a "known limitation" (see the old version of the section
+> below this note). That builder used a 4-digit year; Angel One's actual
+> scrip-master symbol convention uses a 2-digit year (confirmed by
+> fetching the live scrip master directly — e.g. `NIFTY11AUG2621650CE`,
+> not `NIFTY11AUG202621650CE`), so the reconstructed symbol never matched
+> any real instrument and premium lookup always failed with
+> `PremiumUnavailableError` wrapping `angel_one: no instrument found`.
+> The fix removes the reconstruction entirely: step 6 now looks the
+> trading symbol up via `chain.instrument_for(expiry, strike, option_type)`
+> — the same chain `ExpirySelector`/`StrikeSelector` already selected
+> `expiry`/`strike` from — so the symbol is always the broker's own,
+> ground-truth row. `OptionSymbolBuilder` itself was also corrected (2-digit
+> year) as a secondary fix, since it remains a public utility other code
+> could reasonably call, but it is no longer used by this flow at all.
+
 ## Scope
 
 Phase 2 connects the existing AI Signal Engine (Strategy Engine +
@@ -19,6 +50,7 @@ untouched; none of them call into this endpoint or `app.options.recommendation`.
 
 ```mermaid
 flowchart LR
+    R["UnderlyingResolver\n.resolve_historical_instrument(underlying)"] --> A
     A["Market Data\n(fetch_recent_candles)"] --> B["AI Signal Engine\n(StrategyEngine + generate_recommendation)"]
     B --> C{"BUY / SELL / HOLD"}
     C -->|BUY| D["OptionChainService\n.get_option_chain(underlying)"]
@@ -26,7 +58,7 @@ flowchart LR
     C -->|HOLD| Z["OptionRecommendation\nsignal=NO_TRADE"]
     D --> E["ExpirySelector"]
     E --> F["StrikeSelector"]
-    F --> G["OptionSymbolBuilder"]
+    F --> G["chain.instrument_for(expiry, strike, option_type)\n(broker's real tradingsymbol)"]
     G --> H["Broker.ltp()\nPremium Lookup"]
     H --> I["OptionRecommendation\nsignal=BULLISH/BEARISH"]
 ```
@@ -39,9 +71,18 @@ specific recommendation flow.
 
 ## Request flow, step by step
 
-1. `fetch_recent_candles(broker, broker_name, Exchange.NSE, underlying, timeframe)`
-   — the exact same call `app.api.v1.routers.signals` makes; no new
-   market-data path.
+1. `underlying_resolver.resolve_historical_instrument(underlying)` looks
+   up the `(Exchange, tradingsymbol)` pair the broker's historical-data
+   API actually understands for `underlying`'s own spot/index price,
+   sourced from the broker's instrument master (never a hardcoded symbol
+   table — see `app/options/underlying_resolver.py`). That resolved pair
+   is then passed to
+   `fetch_recent_candles(broker, broker_name, exchange, tradingsymbol, timeframe)`.
+   Everything downstream of this step (the strategy engine, the
+   instructor recommendation, and the returned `OptionRecommendation`
+   itself) still labels its output with `underlying`'s display name and
+   `Exchange.NSE` — the resolved tradingsymbol is used only for this one
+   fetch call, never surfaced to the caller.
 2. The latest candle's `close` becomes `underlying_ltp` — reused instead
    of a second `broker.ltp()` call, so the reported LTP is exactly what
    the AI Signal Engine analyzed, and no redundant broker round trip
@@ -57,24 +98,29 @@ specific recommendation flow.
    option chain is never fetched, since there is nothing to select.
 6. For BUY/SELL: `OptionChainService.get_option_chain(underlying)` ->
    `ExpirySelector.select(...)` -> `StrikeSelector.select(...)` ->
-   `OptionSymbolBuilder().build(...)`.
-7. The built symbol's premium is fetched via `broker.ltp(Exchange.NFO, tradingsymbol)`.
-   A `BrokerAPIError`/`BrokerConnectionError` here is wrapped into
-   `PremiumUnavailableError`, so callers only ever see this package's
-   own exception types.
+   `chain.instrument_for(expiry, strike, option_type)` — the chain's own
+   instrument row for that exact contract, carrying the broker's real
+   `tradingsymbol` (and `token`/`lot_size`). If this ever returns `None`
+   (it shouldn't — `expiry`/`strike` were themselves selected from this
+   same chain, so the chain would have to contradict itself between two
+   calls), `OptionContractNotFoundError` is raised rather than crashing on
+   an unhandled `None`.
+7. The instrument's `tradingsymbol`'s premium is fetched via
+   `broker.ltp(Exchange.NFO, tradingsymbol)`. A `BrokerAPIError`/
+   `BrokerConnectionError` here is wrapped into `PremiumUnavailableError`,
+   so callers only ever see this package's own exception types.
 8. The result is returned as an `OptionRecommendation`.
 
-### Known Phase 2 limitation: constructed, not chain-verified, symbol
+### `OptionSymbolBuilder` is no longer used by this flow
 
-Step 6 builds the trading symbol with `OptionSymbolBuilder` rather than
-looking it up via `chain.instrument_for(expiry, strike, option_type)`.
-This is a deliberate simplification, consistent with
-`OptionSymbolBuilder`'s own docstring caveat (prefer the chain's real
-rows — ground truth from the broker — whenever correctness against the
-broker's exact listed contract matters). Because this endpoint only ever
-recommends and never places an order, a builder/chain mismatch has no
-execution consequence today; it is documented here as a known gap to
-revisit before any future phase wires this into order placement.
+An earlier version of step 6 built the trading symbol with
+`OptionSymbolBuilder` (string reconstruction) instead of looking it up on
+the chain — see the "Second bug fix / correction" note at the top of this
+document for why that failed in production and was replaced. The chain's
+own instrument row is always used now; `OptionSymbolBuilder` remains
+available in `app/options/option_symbol_builder.py` as a standalone
+utility for callers that genuinely need to compute a symbol without a
+live chain fetch, with its date-format bug also corrected.
 
 ## API example
 
@@ -90,7 +136,7 @@ GET /api/v1/options/recommendation?underlying=NIFTY&timeframe=5minute
 {
   "underlying": "NIFTY",
   "signal": "BULLISH",
-  "tradingsymbol": "NIFTY07AUG202624000CE",
+  "tradingsymbol": "NIFTY07AUG2624000CE",
   "expiry": "2026-08-07",
   "strike": 24000.0,
   "option_type": "CE",

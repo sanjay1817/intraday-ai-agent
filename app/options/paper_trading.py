@@ -71,6 +71,22 @@ from app.paper.engine import PaperTradingEngine
 from app.paper.models import PaperOrder, TradeMetadata
 
 
+async def get_option_premium_exposure(engine: PaperTradingEngine) -> float:
+    """Total premium currently deployed across every open option (NFO)
+    position — the same figure `enter_option_position`'s risk check uses,
+    factored out so a read-only status endpoint (`GET
+    /api/v1/options/risk/status`) never computes it a second,
+    possibly-diverging way.
+    """
+
+    positions = await engine.get_positions()
+    return sum(
+        abs(position.quantity) * position.average_price
+        for position in positions
+        if position.exchange is Exchange.NFO
+    )
+
+
 async def enter_option_position(
     *,
     broker: BrokerInterface,
@@ -139,12 +155,7 @@ async def enter_option_position(
 
     order_value = quantity * premium
 
-    positions = await engine.get_positions()
-    current_exposure = sum(
-        abs(position.quantity) * position.average_price
-        for position in positions
-        if position.exchange is Exchange.NFO
-    )
+    current_exposure = await get_option_premium_exposure(engine)
 
     check = risk_manager.check_order_allowed(
         lots=lots,

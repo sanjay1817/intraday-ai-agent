@@ -20,12 +20,14 @@ from app.api.v1.routers.signals import get_broker
 from app.brokers.base import BrokerInterface
 from app.config.settings import Settings, get_settings
 from app.domain.enums.trading import HistoricalInterval
+from app.options.auto_trading import AutoOptionsOrchestrator, AutoOptionsStatus
 from app.options.exceptions import OptionsInfrastructureUnavailableError, TradingModeNotEnabledError
 from app.options.models import ExpiryMode, StrikeMode
 from app.options.option_chain_service import OptionChainService
 from app.options.paper_trading import (
     enter_option_position,
     exit_option_position,
+    get_option_premium_exposure,
     get_option_trade_history,
 )
 from app.options.recommendation import generate_option_recommendation
@@ -33,9 +35,11 @@ from app.options.risk import OptionRiskManager
 from app.options.schemas import (
     OptionExitReason,
     OptionRecommendation,
+    OptionRiskStatus,
     OptionSignal,
     OptionTradeHistoryEntry,
 )
+from app.options.underlying_resolver import UnderlyingResolver
 from app.paper.engine import PaperTradingEngine
 from app.paper.models import PaperOrder
 
@@ -84,10 +88,52 @@ def get_option_risk_manager_or_error(request: Request) -> OptionRiskManager:
     return manager  # type: ignore[no-any-return]
 
 
+def get_underlying_resolver_or_error(request: Request) -> UnderlyingResolver:
+    """The shared `UnderlyingResolver` constructed once at application
+    startup (see `app.main`'s lifespan) alongside `option_chain_service`,
+    under the identical condition — `None` for the same reason.
+
+    Raises:
+        OptionsInfrastructureUnavailableError: `app.state.underlying_resolver`
+            is `None` — reuses this Phase 2 exception rather than
+            inventing a new one for the same underlying condition (the
+            resolved broker isn't Angel One).
+    """
+
+    resolver = request.app.state.underlying_resolver
+    if resolver is None:
+        raise OptionsInfrastructureUnavailableError(
+            "no UnderlyingResolver configured — the resolved broker isn't Angel One"
+        )
+    return resolver  # type: ignore[no-any-return]
+
+
+def get_auto_options_orchestrator_or_error(request: Request) -> AutoOptionsOrchestrator:
+    """The shared `AutoOptionsOrchestrator` constructed once at
+    application startup (see `app.main`'s lifespan) alongside
+    `option_chain_service`/`option_risk_manager`, under the identical
+    condition — `None` for the same reason.
+
+    Raises:
+        OptionsInfrastructureUnavailableError: `app.state.auto_options_orchestrator`
+            is `None` — reuses this Phase 2 exception rather than
+            inventing a new one for the same underlying condition (the
+            resolved broker isn't Angel One).
+    """
+
+    orchestrator = request.app.state.auto_options_orchestrator
+    if orchestrator is None:
+        raise OptionsInfrastructureUnavailableError(
+            "no AutoOptionsOrchestrator configured — the resolved broker isn't Angel One"
+        )
+    return orchestrator  # type: ignore[no-any-return]
+
+
 @router.get("/recommendation")
 async def get_option_recommendation(
     broker: Annotated[BrokerInterface, Depends(get_broker)],
     option_chain_service: Annotated[OptionChainService, Depends(get_option_chain_service_or_error)],
+    underlying_resolver: Annotated[UnderlyingResolver, Depends(get_underlying_resolver_or_error)],
     settings: Annotated[Settings, Depends(get_settings)],
     underlying: Annotated[str, Query(min_length=1)],
     timeframe: HistoricalInterval = HistoricalInterval.FIVE_MINUTE,
@@ -130,6 +176,7 @@ async def get_option_recommendation(
         broker=broker,
         broker_name=settings.default_broker,
         option_chain_service=option_chain_service,
+        underlying_resolver=underlying_resolver,
         underlying=underlying,
         timeframe=timeframe,
         strike_mode=StrikeMode(settings.option_strike_mode),
@@ -181,6 +228,7 @@ async def place_option_paper_order(
     body: PlaceOptionOrderRequest,
     broker: Annotated[BrokerInterface, Depends(get_broker)],
     option_chain_service: Annotated[OptionChainService, Depends(get_option_chain_service_or_error)],
+    underlying_resolver: Annotated[UnderlyingResolver, Depends(get_underlying_resolver_or_error)],
     risk_manager: Annotated[OptionRiskManager, Depends(get_option_risk_manager_or_error)],
     engine: Annotated[PaperTradingEngine, Depends(get_paper_engine)],
     settings: Annotated[Settings, Depends(get_settings)],
@@ -231,6 +279,7 @@ async def place_option_paper_order(
         broker=broker,
         broker_name=settings.default_broker,
         option_chain_service=option_chain_service,
+        underlying_resolver=underlying_resolver,
         underlying=body.underlying,
         timeframe=body.timeframe,
         strike_mode=StrikeMode(settings.option_strike_mode),
@@ -317,3 +366,119 @@ async def get_option_paper_trades(
         )
 
     return await get_option_trade_history(engine, underlyings=settings.option_underlyings)
+
+
+@router.get("/risk/status")
+async def get_option_risk_status(
+    engine: Annotated[PaperTradingEngine, Depends(get_paper_engine)],
+    risk_manager: Annotated[OptionRiskManager, Depends(get_option_risk_manager_or_error)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> OptionRiskStatus:
+    """A read-only snapshot of the Phase 3 options risk gate's current
+    counters and configured limits — the Phase 4 Angular dashboard's
+    "Risk Panel" section's one data source.
+
+    Computes `current_premium_exposure` via
+    `app.options.paper_trading.get_option_premium_exposure`, the exact
+    same helper `enter_option_position`'s own risk check uses, so this
+    status endpoint can never diverge from what a real order attempt
+    would see.
+
+    Raises (mapped to HTTP responses by `app.core.exception_handlers`):
+        TradingModeNotEnabledError: 400, `Settings.trading_mode` is not
+            `"OPTIONS"`.
+        OptionsInfrastructureUnavailableError: 503, no `OptionRiskManager`
+            is configured (the resolved broker isn't Angel One).
+    """
+
+    if settings.trading_mode != "OPTIONS":
+        raise TradingModeNotEnabledError(
+            "options risk status requires TRADING_MODE=OPTIONS", underlying=None
+        )
+
+    current = await get_option_premium_exposure(engine)
+    return OptionRiskStatus(
+        current_premium_exposure=current,
+        max_premium_exposure=settings.option_max_premium_exposure,
+        remaining_premium_capacity=max(0.0, settings.option_max_premium_exposure - current),
+        daily_realized_pnl=risk_manager.daily_realized_pnl,
+        max_daily_loss=settings.option_max_daily_loss,
+        max_lots_per_order=settings.option_max_lots_per_order,
+        max_premium_per_order=settings.option_max_premium_per_order,
+    )
+
+
+@router.get("/auto/status")
+async def get_auto_options_status(
+    orchestrator: Annotated[AutoOptionsOrchestrator, Depends(get_auto_options_orchestrator_or_error)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AutoOptionsStatus:
+    """A read-only snapshot of Phase 5's automatic PAPER option-trading
+    scheduler (`app.options.auto_trading.AutoOptionsOrchestrator`).
+
+    Raises (mapped to HTTP responses by `app.core.exception_handlers`):
+        TradingModeNotEnabledError: 400, `Settings.trading_mode` is not
+            `"OPTIONS"`.
+        OptionsInfrastructureUnavailableError: 503, no
+            `AutoOptionsOrchestrator` is configured (the resolved broker
+            isn't Angel One).
+    """
+
+    if settings.trading_mode != "OPTIONS":
+        raise TradingModeNotEnabledError(
+            "auto options trading requires TRADING_MODE=OPTIONS", underlying=None
+        )
+
+    return orchestrator.status()
+
+
+@router.post("/auto/start")
+async def start_auto_options_trading(
+    orchestrator: Annotated[AutoOptionsOrchestrator, Depends(get_auto_options_orchestrator_or_error)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AutoOptionsStatus:
+    """Start the automatic PAPER option-trading loop. Idempotent: a
+    second call while already running is a no-op, not an error.
+
+    Raises (mapped to HTTP responses by `app.core.exception_handlers`):
+        TradingModeNotEnabledError: 400, `Settings.trading_mode` is not
+            `"OPTIONS"`.
+        OptionsInfrastructureUnavailableError: 503, no
+            `AutoOptionsOrchestrator` is configured (the resolved broker
+            isn't Angel One).
+    """
+
+    if settings.trading_mode != "OPTIONS":
+        raise TradingModeNotEnabledError(
+            "auto options trading requires TRADING_MODE=OPTIONS", underlying=None
+        )
+
+    await orchestrator.start()
+    return orchestrator.status()
+
+
+@router.post("/auto/stop")
+async def stop_auto_options_trading(
+    orchestrator: Annotated[AutoOptionsOrchestrator, Depends(get_auto_options_orchestrator_or_error)],
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AutoOptionsStatus:
+    """Stop the automatic PAPER option-trading loop, waiting for the
+    current cycle (if any) to finish first. Idempotent. Does not touch
+    any already-open option positions — exit them via
+    `/api/v1/options/paper/exit` if that's what's wanted.
+
+    Raises (mapped to HTTP responses by `app.core.exception_handlers`):
+        TradingModeNotEnabledError: 400, `Settings.trading_mode` is not
+            `"OPTIONS"`.
+        OptionsInfrastructureUnavailableError: 503, no
+            `AutoOptionsOrchestrator` is configured (the resolved broker
+            isn't Angel One).
+    """
+
+    if settings.trading_mode != "OPTIONS":
+        raise TradingModeNotEnabledError(
+            "auto options trading requires TRADING_MODE=OPTIONS", underlying=None
+        )
+
+    await orchestrator.stop()
+    return orchestrator.status()

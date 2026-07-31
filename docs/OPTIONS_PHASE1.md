@@ -86,10 +86,13 @@ tests/unit/options/
   direction reverses between calls and puts. Overshooting `steps` clamps
   to the nearest valid strike rather than raising.
 - **`OptionSymbolBuilder`** — builds an Angel-One-style option trading
-  symbol (`{UNDERLYING}{DDMMMYYYY}{STRIKE}{CE|PE}`) without a live chain
-  fetch, for callers that want to compute a symbol offline (lookups,
-  tests). Prefer a real chain's instrument rows (ground truth from the
-  broker) whenever one is already in hand.
+  symbol (`{UNDERLYING}{DDMMMYY}{STRIKE}{CE|PE}` — a 2-digit year, e.g.
+  `NIFTY28JUL2617500CE`, confirmed against Angel One's live scrip master;
+  see that module's docstring for the earlier 4-digit-year bug this
+  corrected) without a live chain fetch, for callers that want to compute
+  a symbol offline (lookups, tests). `generate_option_recommendation`
+  (Phase 2) prefers a real chain's instrument rows (ground truth from the
+  broker) instead of this builder whenever a chain is already in hand.
 
 ## Settings
 

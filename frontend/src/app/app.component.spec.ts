@@ -23,6 +23,6 @@ describe('AppComponent', () => {
     const fixture = TestBed.createComponent(AppComponent);
     fixture.detectChanges();
     const compiled = fixture.nativeElement as HTMLElement;
-    expect(compiled.querySelectorAll('.sidenav a').length).toBe(8);
+    expect(compiled.querySelectorAll('.sidenav a').length).toBe(9);
   });
 });

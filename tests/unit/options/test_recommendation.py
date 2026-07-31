@@ -14,7 +14,12 @@ from app.domain.entities.broker import HistoricalBar, Quote
 from app.domain.enums.trading import BrokerName, Exchange, HistoricalInterval
 from app.domain.exceptions.broker import BrokerAPIError, BrokerConnectionError
 from app.domain.exceptions.market import NoHistoricalDataError
-from app.options.exceptions import OptionChainFetchError, PremiumUnavailableError
+from app.options.exceptions import (
+    OptionChainFetchError,
+    OptionContractNotFoundError,
+    PremiumUnavailableError,
+    UnderlyingInstrumentNotFoundError,
+)
 from app.options.models import ExpiryMode, OptionInstrument, OptionType, StrikeMode
 from app.options.option_chain_service import OptionChainService
 from app.options.recommendation import generate_option_recommendation
@@ -74,6 +79,29 @@ class FakeBroker:
         if self._ltp_exception is not None:
             raise self._ltp_exception
         return Quote(tradingsymbol=tradingsymbol, exchange=exchange, last_price=self._ltp or 0.0)
+
+
+class FakeUnderlyingResolver:
+    """A hand-written `UnderlyingResolver` fake, mirroring `FakeOptionSource`
+    below: no real `AngelOneInstrumentMaster`/HTTP plumbing needed since the
+    seam is already abstracted via `Protocol`.
+
+    Defaults to resolving `underlying` to `f"{underlying} SPOT"` on
+    `Exchange.NSE` — deliberately NOT the identity mapping, so any test
+    that (incorrectly) still fetches candles for the raw `underlying`
+    string instead of the resolved pair would be caught by
+    `broker.historical_calls` recording the wrong tradingsymbol.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+        self.exception: Exception | None = None
+
+    async def resolve_historical_instrument(self, underlying: str) -> tuple[Exchange, str]:
+        self.calls.append(underlying)
+        if self.exception is not None:
+            raise self.exception
+        return (Exchange.NSE, f"{underlying} SPOT")
 
 
 class FakeOptionSource:
@@ -140,6 +168,7 @@ async def test_buy_maps_to_bullish_ce_with_atm_strike_and_expiry() -> None:
         broker=broker,
         broker_name=BrokerName.ANGEL_ONE,
         option_chain_service=service,
+        underlying_resolver=FakeUnderlyingResolver(),
         underlying="NIFTY",
         timeframe=HistoricalInterval.FIVE_MINUTE,
         strike_mode=StrikeMode.ATM,
@@ -171,6 +200,7 @@ async def test_sell_maps_to_bearish_pe() -> None:
         broker=broker,
         broker_name=BrokerName.ANGEL_ONE,
         option_chain_service=service,
+        underlying_resolver=FakeUnderlyingResolver(),
         underlying="NIFTY",
         timeframe=HistoricalInterval.FIVE_MINUTE,
         strike_mode=StrikeMode.ATM,
@@ -194,6 +224,7 @@ async def test_hold_returns_no_trade_and_never_touches_option_chain() -> None:
         broker=broker,
         broker_name=BrokerName.ANGEL_ONE,
         option_chain_service=service,
+        underlying_resolver=FakeUnderlyingResolver(),
         underlying="NIFTY",
         timeframe=HistoricalInterval.FIVE_MINUTE,
         strike_mode=StrikeMode.ATM,
@@ -224,6 +255,7 @@ async def test_expiry_mode_is_passed_through_to_expiry_selector() -> None:
         broker=broker,
         broker_name=BrokerName.ANGEL_ONE,
         option_chain_service=service,
+        underlying_resolver=FakeUnderlyingResolver(),
         underlying="NIFTY",
         timeframe=HistoricalInterval.FIVE_MINUTE,
         strike_mode=StrikeMode.ATM,
@@ -247,6 +279,7 @@ async def test_strike_mode_is_passed_through_to_strike_selector() -> None:
         broker=broker,
         broker_name=BrokerName.ANGEL_ONE,
         option_chain_service=service,
+        underlying_resolver=FakeUnderlyingResolver(),
         underlying="NIFTY",
         timeframe=HistoricalInterval.FIVE_MINUTE,
         strike_mode=StrikeMode.ATM,
@@ -257,6 +290,7 @@ async def test_strike_mode_is_passed_through_to_strike_selector() -> None:
         broker=broker,
         broker_name=BrokerName.ANGEL_ONE,
         option_chain_service=service,
+        underlying_resolver=FakeUnderlyingResolver(),
         underlying="NIFTY",
         timeframe=HistoricalInterval.FIVE_MINUTE,
         strike_mode=StrikeMode.OTM,
@@ -284,6 +318,7 @@ async def test_premium_unavailable_error_raised_when_broker_ltp_fails() -> None:
             broker=broker,
             broker_name=BrokerName.ANGEL_ONE,
             option_chain_service=service,
+            underlying_resolver=FakeUnderlyingResolver(),
             underlying="NIFTY",
             timeframe=HistoricalInterval.FIVE_MINUTE,
             strike_mode=StrikeMode.ATM,
@@ -309,6 +344,7 @@ async def test_broker_connection_error_on_ltp_is_wrapped_too() -> None:
             broker=broker,
             broker_name=BrokerName.ANGEL_ONE,
             option_chain_service=service,
+            underlying_resolver=FakeUnderlyingResolver(),
             underlying="NIFTY",
             timeframe=HistoricalInterval.FIVE_MINUTE,
             strike_mode=StrikeMode.ATM,
@@ -327,6 +363,7 @@ async def test_no_historical_data_error_propagates_unchanged() -> None:
             broker=broker,
             broker_name=BrokerName.ANGEL_ONE,
             option_chain_service=service,
+            underlying_resolver=FakeUnderlyingResolver(),
             underlying="NIFTY",
             timeframe=HistoricalInterval.FIVE_MINUTE,
             strike_mode=StrikeMode.ATM,
@@ -346,6 +383,182 @@ async def test_option_chain_fetch_error_propagates_for_buy_sell() -> None:
             broker=broker,
             broker_name=BrokerName.ANGEL_ONE,
             option_chain_service=service,
+            underlying_resolver=FakeUnderlyingResolver(),
+            underlying="NIFTY",
+            timeframe=HistoricalInterval.FIVE_MINUTE,
+            strike_mode=StrikeMode.ATM,
+            expiry_mode=ExpiryMode.NEAREST_WEEKLY,
+            now=datetime(2026, 7, 28, 10, 0, tzinfo=UTC),
+        )
+
+
+async def test_candle_fetch_uses_resolved_instrument_not_raw_underlying() -> None:
+    """The actual regression test for the bug this file's `UnderlyingResolver`
+    parameter fixes: `generate_option_recommendation` must fetch candles for
+    the resolver's returned `(exchange, tradingsymbol)` pair, never
+    `Exchange.NSE`/the raw `underlying` string directly.
+    """
+
+    bars = _bars(_uptrend_closes())
+    underlying_ltp = bars[-1].close
+    broker = FakeBroker(bars=bars, ltp=42.5)
+    source = FakeOptionSource()
+    strikes = sorted({max(round(underlying_ltp - 200 + 100 * i, -2), 100.0) for i in range(6)})
+    _seed_nifty_chain(source, strikes)
+    service = _make_chain_service(source)
+    resolver = FakeUnderlyingResolver()
+
+    await generate_option_recommendation(
+        broker=broker,
+        broker_name=BrokerName.ANGEL_ONE,
+        option_chain_service=service,
+        underlying_resolver=resolver,
+        underlying="NIFTY",
+        timeframe=HistoricalInterval.FIVE_MINUTE,
+        strike_mode=StrikeMode.ATM,
+        expiry_mode=ExpiryMode.NEAREST_WEEKLY,
+        now=datetime(2026, 7, 28, 10, 0, tzinfo=UTC),
+    )
+
+    assert resolver.calls == ["NIFTY"]
+    assert broker.historical_calls == [(Exchange.NSE, "NIFTY SPOT", HistoricalInterval.FIVE_MINUTE)]
+
+
+def _ground_truth_instrument(
+    underlying: str, expiry: date, strike: float, option_type: OptionType
+) -> OptionInstrument:
+    """Builds a chain instrument whose `tradingsymbol` is deliberately
+    NOT what `OptionSymbolBuilder`/any string-reconstruction would
+    produce (in any year-format variant) -- e.g. `"BROKER-NIFTY-..."`
+    rather than `"NIFTY..."`. This is what makes the tests below actual
+    regression tests for the bug this fix addresses (premium lookup was
+    reconstructing a symbol from strings instead of using the chain's own
+    ground-truth row): if `generate_option_recommendation` ever regresses
+    to rebuilding the symbol instead of using
+    `chain.instrument_for(...).tradingsymbol`, `result.tradingsymbol`
+    would come back looking like a real Angel One symbol
+    (`"NIFTY...CE"`), not this obviously-synthetic ground-truth string --
+    and the assertions below would fail.
+    """
+
+    ground_truth_symbol = (
+        f"BROKER-{underlying}-{expiry.isoformat()}-{int(strike)}-{option_type.value}"
+    )
+    return OptionInstrument(
+        underlying=underlying,
+        expiry=expiry,
+        strike=strike,
+        option_type=option_type,
+        tradingsymbol=ground_truth_symbol,
+        exchange=Exchange.NFO,
+        token="42",
+        lot_size=50,
+    )
+
+
+def _seed_ground_truth_chain(source: FakeOptionSource, underlying: str, strikes: list[float]) -> None:
+    instruments = []
+    for expiry in (_NEAR_EXPIRY, _FAR_EXPIRY):
+        for strike in strikes:
+            instruments.append(_ground_truth_instrument(underlying, expiry, strike, OptionType.CE))
+            instruments.append(_ground_truth_instrument(underlying, expiry, strike, OptionType.PE))
+    source.instruments[underlying] = instruments
+
+
+@pytest.mark.parametrize("underlying", ["NIFTY", "BANKNIFTY", "FINNIFTY"])
+async def test_premium_lookup_uses_chain_ground_truth_tradingsymbol_not_a_reconstructed_one(
+    underlying: str,
+) -> None:
+    """Regression test for the actual production bug: premium lookup
+    must use the `tradingsymbol` already present on the `OptionInstrument`
+    `OptionChainService` returned, never rebuild one via
+    `OptionSymbolBuilder` (whose earlier 4-digit-year format didn't match
+    any real Angel One instrument, causing every premium lookup to fail
+    with `PremiumUnavailableError` / `angel_one: no instrument found`).
+    Covers all three configured underlyings.
+    """
+
+    bars = _bars(_uptrend_closes())
+    underlying_ltp = bars[-1].close
+    broker = FakeBroker(bars=bars, ltp=42.5)
+    source = FakeOptionSource()
+    strikes = sorted({max(round(underlying_ltp - 200 + 100 * i, -2), 100.0) for i in range(6)})
+    _seed_ground_truth_chain(source, underlying, strikes)
+    service = _make_chain_service(source, underlyings=["NIFTY", "BANKNIFTY", "FINNIFTY"])
+    resolver = FakeUnderlyingResolver()
+
+    result = await generate_option_recommendation(
+        broker=broker,
+        broker_name=BrokerName.ANGEL_ONE,
+        option_chain_service=service,
+        underlying_resolver=resolver,
+        underlying=underlying,
+        timeframe=HistoricalInterval.FIVE_MINUTE,
+        strike_mode=StrikeMode.ATM,
+        expiry_mode=ExpiryMode.NEAREST_WEEKLY,
+        now=datetime(2026, 7, 28, 10, 0, tzinfo=UTC),
+    )
+
+    assert result.signal == OptionSignal.BULLISH
+    assert result.tradingsymbol is not None
+    assert result.tradingsymbol.startswith(f"BROKER-{underlying}-")
+    assert result.premium == 42.5
+    # The broker's `ltp()` was called with the SAME ground-truth symbol
+    # the chain returned -- not a rebuilt one.
+    assert broker.ltp_calls == [(Exchange.NFO, result.tradingsymbol)]
+
+
+async def test_option_contract_not_found_error_when_chain_is_missing_the_selected_instrument() -> None:
+    """Defensive-guard test: if the chain's `instrument_for(...)` somehow
+    has no row for the selected expiry/strike/option_type (should not
+    happen given `expiry`/`strike` are themselves derived from this same
+    chain), `generate_option_recommendation` raises a domain exception
+    rather than crashing on an unhandled `None`/`AttributeError`.
+    """
+
+    bars = _bars(_uptrend_closes())
+    underlying_ltp = bars[-1].close
+    broker = FakeBroker(bars=bars, ltp=42.5)
+    source = FakeOptionSource()
+    # Seed a chain whose strikes list is non-empty (so ExpirySelector/
+    # StrikeSelector succeed) but whose instruments deliberately don't
+    # include a CE for the strike ExpirySelector/StrikeSelector will pick.
+    strike = max(round(underlying_ltp, -2), 100.0)
+    source.instruments["NIFTY"] = [
+        _ground_truth_instrument("NIFTY", _NEAR_EXPIRY, strike, OptionType.PE),  # PE only, no CE
+    ]
+    service = _make_chain_service(source)
+
+    with pytest.raises(OptionContractNotFoundError):
+        await generate_option_recommendation(
+            broker=broker,
+            broker_name=BrokerName.ANGEL_ONE,
+            option_chain_service=service,
+            underlying_resolver=FakeUnderlyingResolver(),
+            underlying="NIFTY",
+            timeframe=HistoricalInterval.FIVE_MINUTE,
+            strike_mode=StrikeMode.ATM,
+            expiry_mode=ExpiryMode.NEAREST_WEEKLY,
+            now=datetime(2026, 7, 28, 10, 0, tzinfo=UTC),
+        )
+
+
+async def test_underlying_instrument_not_found_error_propagates_uncaught() -> None:
+    bars = _bars(_uptrend_closes())
+    broker = FakeBroker(bars=bars, ltp=42.5)
+    source = FakeOptionSource()
+    service = _make_chain_service(source)
+    resolver = FakeUnderlyingResolver()
+    resolver.exception = UnderlyingInstrumentNotFoundError(
+        "no NSE index/equity instrument found for underlying 'NIFTY'", underlying="NIFTY"
+    )
+
+    with pytest.raises(UnderlyingInstrumentNotFoundError):
+        await generate_option_recommendation(
+            broker=broker,
+            broker_name=BrokerName.ANGEL_ONE,
+            option_chain_service=service,
+            underlying_resolver=resolver,
             underlying="NIFTY",
             timeframe=HistoricalInterval.FIVE_MINUTE,
             strike_mode=StrikeMode.ATM,

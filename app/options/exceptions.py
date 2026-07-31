@@ -64,6 +64,31 @@ class PremiumUnavailableError(OptionsError):
     """
 
 
+class UnderlyingInstrumentNotFoundError(OptionsError):
+    """Raised by `app.options.underlying_resolver.UnderlyingResolver
+    .resolve_historical_instrument` when no matching instrument-master row
+    can be found for the requested underlying's own spot/index price —
+    distinct from `UnsupportedUnderlyingError` (which means "not in
+    `Settings.option_underlyings`"): this means "configured, but the
+    broker's own instrument master has no matching row for it".
+    """
+
+
+class OptionContractNotFoundError(OptionsError):
+    """Raised when the selected expiry/strike/option-type combination has
+    no matching row in the option chain's own instrument list — i.e.
+    `OptionChain.instrument_for(...)` returned `None`.
+
+    Should not happen in practice: the expiry/strike being looked up are
+    themselves derived from the SAME chain (`ExpirySelector`/`StrikeSelector`
+    only ever choose from values `OptionChain.expiries()`/`strikes_for_expiry()`
+    already returned), so a chain that's internally consistent can never hit
+    this. Kept as a defensive guard — and to give `generate_option_recommendation`
+    a domain exception instead of an `AssertionError`/unhandled `None` — in
+    case a future change ever lets that invariant slip.
+    """
+
+
 class OptionsInfrastructureUnavailableError(OptionsError):
     """Raised when `app.state.option_chain_service` is `None` because the
     configured broker isn't Angel One (see `app.main`'s lifespan wiring),

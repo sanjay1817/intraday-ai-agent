@@ -11,6 +11,7 @@ Nested env vars use `__` as the delimiter, e.g. a Zerodha API key is read
 from `BROKER__ZERODHA__API_KEY` (see `.env.example`).
 """
 
+from datetime import time
 from functools import lru_cache
 from typing import Literal
 
@@ -226,6 +227,53 @@ class Settings(BaseSettings):
     option_max_daily_loss: float = Field(default=10_000.0, gt=0)
 
     broker: BrokerSettings = BrokerSettings()
+
+    #: Whether `app.options.auto_trading.AutoOptionsOrchestrator` starts
+    #: automatically during `app.main`'s lifespan (only when
+    #: `trading_mode` is also `"OPTIONS"` — see that module's wiring in
+    #: `app.main`). Mirrors `auto_trading_enabled`'s exact semantics for
+    #: the equity orchestrator: `POST`/`GET /api/v1/options/auto/*` can
+    #: start/stop/inspect it at runtime regardless of this value.
+    auto_options_enabled: bool = False
+
+    #: IST wall-clock time at/after which `AutoOptionsOrchestrator`
+    #: force-exits every open paper option position it is tracking,
+    #: regardless of premium — mirrors `app.auto.models
+    #: .AutoTradingConfig.square_off_time`'s exact purpose for options.
+    auto_option_exit_time: time = Field(default=time(15, 20))
+
+    #: Orchestrator-level cap on simultaneously open option positions —
+    #: a plain position-count gate this orchestrator checks itself
+    #: (`app.options.risk.OptionRiskManager.check_order_allowed` was
+    #: deliberately never given an `open_position_count` parameter; see
+    #: `app.options.auto_trading`'s module docstring).
+    auto_max_open_option_positions: int = Field(default=3, gt=0)
+
+    #: How often (seconds) `AutoOptionsOrchestrator` scans every
+    #: configured underlying for a fresh recommendation and re-checks
+    #: every open position's exit conditions.
+    auto_option_scan_interval_seconds: float = Field(default=30.0, gt=0)
+
+    #: Minimum `OptionRecommendation.confidence` `AutoOptionsOrchestrator`
+    #: acts on for a new entry — the options equivalent of
+    #: `auto_confidence_threshold` above.
+    auto_option_confidence_threshold: float = Field(default=60.0, ge=0, le=100)
+
+    #: Fixed lot count `AutoOptionsOrchestrator` requests for every entry
+    #: it places — no dynamic position-sizing-by-capital logic in this
+    #: phase (see `docs/OPTIONS_PHASE5.md`).
+    auto_option_lots_per_trade: int = Field(default=1, gt=0)
+
+    #: Percentage of entry premium below which `AutoOptionsOrchestrator`
+    #: exits a tracked position as a stop-loss — a deliberate
+    #: premium-percentage simplification with no Greeks/IV modeling (see
+    #: `app.options.auto_trading`'s module docstring).
+    auto_option_stop_loss_percent: float = Field(default=30.0, gt=0, le=100)
+
+    #: Percentage of entry premium above which `AutoOptionsOrchestrator`
+    #: exits a tracked position as a target hit — the same
+    #: premium-percentage simplification as `auto_option_stop_loss_percent`.
+    auto_option_target_percent: float = Field(default=50.0, gt=0)
 
     @field_validator("paper_market_data_broker")
     @classmethod

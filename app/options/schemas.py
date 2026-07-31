@@ -174,3 +174,22 @@ class OptionTradeHistoryEntry(BaseModel):
     reasoning: str | None = None
     entry_timestamp: datetime
     exit_timestamp: datetime
+
+
+class OptionRiskStatus(BaseModel):
+    """`GET /api/v1/options/risk/status`'s response: a read-only snapshot
+    of the Phase 3 options risk gate's (`app.options.risk.OptionRiskManager`)
+    current counters and the configured limits they're measured against —
+    the Phase 4 Angular dashboard's "Risk Panel" section reads this
+    directly rather than re-deriving any of it client-side.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    current_premium_exposure: float
+    max_premium_exposure: float
+    remaining_premium_capacity: float
+    daily_realized_pnl: float
+    max_daily_loss: float
+    max_lots_per_order: int
+    max_premium_per_order: float

@@ -62,6 +62,11 @@ def test_health_reports_settings_derived_identity() -> None:
     assert body["app_env"] == "testing"
     assert body["ready"] is False
     assert body["uptime_seconds"] >= 0
+    assert body["trading_mode"] == "EQUITY"
+    assert body["default_broker"] == "angel_one"
+    assert body["options_infrastructure_available"] is False
+    assert isinstance(body["option_underlyings"], list)
+    assert body["option_default_lot_size"] > 0
 
 
 def test_health_reflects_ready_state() -> None:
@@ -71,6 +76,21 @@ def test_health_reflects_ready_state() -> None:
     response = client.get("/health")
 
     assert response.json()["ready"] is True
+
+
+def test_health_reports_options_infrastructure_available_when_configured() -> None:
+    client = _client()
+    client.app.state.option_chain_service = object()  # type: ignore[attr-defined]
+
+    response = client.get("/health")
+
+    assert response.json()["options_infrastructure_available"] is True
+
+
+def test_health_reports_options_infrastructure_unavailable_by_default() -> None:
+    response = _client().get("/health")
+
+    assert response.json()["options_infrastructure_available"] is False
 
 
 def test_health_uptime_increases_monotonically_across_calls() -> None:

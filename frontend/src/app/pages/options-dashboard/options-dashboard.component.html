@@ -1,0 +1,323 @@
+<h1>Options Dashboard</h1>
+
+<!-- 1. AI Recommendation -->
+<div class="card section">
+  <div class="section-head">
+    <h3>AI Recommendation</h3>
+    <select
+      class="underlying-select"
+      [ngModel]="selectedUnderlying()"
+      (ngModelChange)="onUnderlyingChange($event)"
+      aria-label="Select underlying"
+    >
+      <option *ngFor="let u of underlyings()" [value]="u">{{ u }}</option>
+    </select>
+  </div>
+
+  <div class="error-banner" *ngIf="recommendationError()">{{ recommendationError() }}</div>
+
+  <ng-container *ngIf="recommendation() as rec; else recLoading">
+    <div class="row-head">
+      <span class="symbol">{{ rec.underlying }}</span>
+      <span
+        class="badge"
+        [class.buy]="rec.signal === 'BULLISH'"
+        [class.sell]="rec.signal === 'BEARISH'"
+        [class.hold]="rec.signal === 'NO_TRADE'"
+      >
+        {{ rec.signal }}
+      </span>
+    </div>
+    <div class="metric">Confidence: <strong>{{ rec.confidence | number: '1.0-1' }}%</strong></div>
+    <p class="reasoning">{{ rec.reasoning }}</p>
+    <div class="metric">Generated: {{ rec.generated_at | date: 'medium' }}</div>
+  </ng-container>
+  <ng-template #recLoading>
+    <div class="empty-state" *ngIf="!recommendationError()">Loading…</div>
+  </ng-template>
+</div>
+
+<!-- 2. Selected Option -->
+<div class="card section" *ngIf="recommendation() as rec">
+  <h3>Selected Option</h3>
+  <div *ngIf="rec.signal !== 'NO_TRADE'; else noTrade" class="grid grid-cols-auto">
+    <div class="card">
+      <div class="label">Trading Symbol</div>
+      <div class="value">{{ rec.tradingsymbol }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Strike</div>
+      <div class="value">{{ rec.strike }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Expiry</div>
+      <div class="value">{{ rec.expiry }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Option Type</div>
+      <div class="value">{{ rec.option_type }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Current Premium</div>
+      <div class="value">{{ rec.premium !== null ? ('₹' + (rec.premium | number: '1.2-2')) : 'Premium unavailable' }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Underlying LTP</div>
+      <div class="value">₹{{ rec.underlying_ltp | number: '1.2-2' }}</div>
+    </div>
+  </div>
+  <ng-template #noTrade>
+    <div class="empty-state">No trade recommended</div>
+  </ng-template>
+</div>
+
+<!-- 3. Open Positions -->
+<div class="card section">
+  <h3>Open Positions ({{ optionPositions().length }})</h3>
+  <div class="table-wrap" *ngIf="optionPositions().length; else noPositions">
+    <table>
+      <thead>
+        <tr>
+          <th>Option Symbol</th>
+          <th>Quantity</th>
+          <th>Lots</th>
+          <th>Entry Premium</th>
+          <th>Current Premium</th>
+          <th>Unrealized P&amp;L</th>
+          <th>Realized P&amp;L</th>
+          <th>Status</th>
+          <th>Entry Time</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Every row here is by definition an open position -- a
+             fully-closed position is removed by the engine, not kept
+             around with a status flag -- so "OPEN" is a hardcoded
+             literal per row, not read from any field. -->
+        <tr *ngFor="let pos of optionPositions()">
+          <td>{{ pos.symbol }}</td>
+          <td>{{ pos.quantity }}</td>
+          <td [title]="'approximate — actual per-contract lot size is not returned by this endpoint'">
+            {{ approximateLots(pos) }}
+          </td>
+          <td>{{ pos.average_price | number: '1.2-2' }}</td>
+          <td>{{ pos.last_price | number: '1.2-2' }}</td>
+          <td [class.pnl-positive]="pos.unrealized_pnl >= 0" [class.pnl-negative]="pos.unrealized_pnl < 0">
+            {{ pos.unrealized_pnl | number: '1.2-2' }}
+          </td>
+          <td [class.pnl-positive]="pos.realized_pnl >= 0" [class.pnl-negative]="pos.realized_pnl < 0">
+            {{ pos.realized_pnl | number: '1.2-2' }}
+          </td>
+          <td><span class="badge running">OPEN</span></td>
+          <td>{{ pos.opened_at | date: 'short' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #noPositions>
+    <div class="empty-state">No open option positions</div>
+  </ng-template>
+</div>
+
+<!-- 4. Portfolio Summary -->
+<div class="card section" *ngIf="portfolio() as p">
+  <h3>Portfolio Summary</h3>
+  <div class="error-banner" *ngIf="portfolioError()">{{ portfolioError() }}</div>
+  <div class="grid grid-cols-auto">
+    <div class="card">
+      <div class="label">Cash Balance</div>
+      <div class="value">₹{{ p.cash | number: '1.2-2' }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Equity / Market Value</div>
+      <div class="value">₹{{ p.equity | number: '1.2-2' }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Premium Invested</div>
+      <div class="value">₹{{ p.used_capital | number: '1.2-2' }}</div>
+    </div>
+    <div class="card">
+      <!-- `Portfolio.total_pnl` is cumulative since the last paper
+           reset, not day-scoped -- labelled honestly rather than as a
+           false "Today's PnL". Genuinely day-scoped P&L (options-only)
+           is shown separately in the Risk Panel below. -->
+      <div class="label">Total P&amp;L (since reset)</div>
+      <div class="value" [class.pnl-positive]="p.total_pnl >= 0" [class.pnl-negative]="p.total_pnl < 0">
+        ₹{{ p.total_pnl | number: '1.2-2' }}
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Return %</div>
+      <div class="value" *ngIf="returnPercent() as pct; else naReturn">
+        {{ pct | number: '1.2-2' }}%
+      </div>
+      <ng-template #naReturn><div class="value">—</div></ng-template>
+    </div>
+  </div>
+</div>
+
+<!-- 5. Trade History -->
+<div class="card section">
+  <h3>Trade History</h3>
+  <div class="error-banner" *ngIf="tradesError()">{{ tradesError() }}</div>
+  <div class="table-wrap" *ngIf="trades().length; else noTrades">
+    <table>
+      <thead>
+        <tr>
+          <th>Entry</th>
+          <th>Exit</th>
+          <th>P&amp;L</th>
+          <th>Holding Time</th>
+          <th>Reason</th>
+          <th>AI Confidence</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let trade of trades()">
+          <td>₹{{ trade.entry_premium | number: '1.2-2' }} &#64; {{ trade.entry_timestamp | date: 'short' }}</td>
+          <td>₹{{ trade.exit_premium | number: '1.2-2' }} &#64; {{ trade.exit_timestamp | date: 'short' }}</td>
+          <td [class.pnl-positive]="trade.pnl >= 0" [class.pnl-negative]="trade.pnl < 0">
+            {{ trade.pnl | number: '1.2-2' }}
+          </td>
+          <td>{{ formatHoldingTime(trade.holding_seconds) }}</td>
+          <td>{{ trade.reason ?? '—' }}</td>
+          <td>{{ trade.confidence !== null ? (trade.confidence | number: '1.0-1') + '%' : '—' }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+  <ng-template #noTrades>
+    <div class="empty-state">No option trades yet</div>
+  </ng-template>
+</div>
+
+<!-- 6. Risk Panel -->
+<div class="card section">
+  <h3>Risk Panel</h3>
+  <div class="error-banner" *ngIf="riskError()">{{ riskError() }}</div>
+  <div class="grid grid-cols-auto" *ngIf="riskStatus() as risk; else riskUnavailable">
+    <div class="card">
+      <div class="label">Current Premium Exposure</div>
+      <div class="value">₹{{ risk.current_premium_exposure | number: '1.2-2' }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Daily Loss</div>
+      <div
+        class="value"
+        [class.pnl-positive]="risk.daily_realized_pnl >= 0"
+        [class.pnl-negative]="risk.daily_realized_pnl < 0"
+      >
+        ₹{{ risk.daily_realized_pnl | number: '1.2-2' }}
+      </div>
+    </div>
+    <div class="card">
+      <div class="label">Maximum Lots</div>
+      <div class="value">{{ risk.max_lots_per_order }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Remaining Capacity</div>
+      <div class="value">₹{{ risk.remaining_premium_capacity | number: '1.2-2' }}</div>
+    </div>
+  </div>
+  <ng-template #riskUnavailable>
+    <div class="empty-state" *ngIf="!riskError()">Loading…</div>
+  </ng-template>
+</div>
+
+<!-- 7. Auto Options Trading (Phase 5) -->
+<div class="card section">
+  <h3>Auto Options Trading</h3>
+  <div class="error-banner" *ngIf="optionAutoError()">{{ optionAutoError() }}</div>
+  <ng-container *ngIf="optionAutoStatus() as auto; else autoUnavailable">
+    <div class="row-head">
+      <span
+        class="badge"
+        [class.running]="auto.running"
+        [class.stopped]="!auto.running"
+      >
+        {{ auto.running ? 'RUNNING' : 'STOPPED' }}
+      </span>
+    </div>
+    <div class="grid grid-cols-auto">
+      <div class="card">
+        <div class="label">Current Action</div>
+        <div class="value">{{ auto.last_action }}</div>
+      </div>
+      <div class="card">
+        <div class="label">Last Scan</div>
+        <div class="value">{{ auto.last_scan_at ? (auto.last_scan_at | date: 'medium') : '—' }}</div>
+      </div>
+      <div class="card">
+        <div class="label">Next Scan</div>
+        <div class="value">{{ auto.next_scan_at ? (auto.next_scan_at | date: 'medium') : '—' }}</div>
+      </div>
+      <div class="card">
+        <div class="label">Open Positions</div>
+        <div class="value">{{ auto.open_position_count }}</div>
+      </div>
+      <div class="card">
+        <div class="label">Trades Today</div>
+        <div class="value">{{ auto.trades_today }}</div>
+      </div>
+      <div class="card">
+        <div class="label">Today's Realized P&amp;L</div>
+        <div
+          class="value"
+          [class.pnl-positive]="auto.daily_realized_pnl >= 0"
+          [class.pnl-negative]="auto.daily_realized_pnl < 0"
+        >
+          ₹{{ auto.daily_realized_pnl | number: '1.2-2' }}
+        </div>
+      </div>
+    </div>
+  </ng-container>
+  <ng-template #autoUnavailable>
+    <div class="empty-state" *ngIf="!optionAutoError()">Loading…</div>
+  </ng-template>
+</div>
+
+<!-- 8. System Status -->
+<div class="card section">
+  <h3>System Status</h3>
+  <div class="error-banner" *ngIf="healthError()">{{ healthError() }}</div>
+  <div class="grid grid-cols-auto" *ngIf="health() as h; else statusLoading">
+    <div class="card">
+      <!-- `/health`'s `ready` flag reflects application-startup
+           completion, not a live broker-authentication check (see
+           `app.api.v1.routers.health`'s own docstring) -- labelled
+           "Backend Ready", not "Broker Connected", to avoid overstating
+           what this actually verifies. -->
+      <div class="label">Backend Ready</div>
+      <span class="badge" [class.running]="h.ready" [class.stopped]="!h.ready">
+        {{ h.ready ? 'READY' : 'NOT READY' }}
+      </span>
+    </div>
+    <div class="card">
+      <div class="label">Trading Mode</div>
+      <div class="value">{{ h.trading_mode }}</div>
+    </div>
+    <div class="card">
+      <div class="label">Paper Trading Status</div>
+      <span class="badge" [class.running]="paperTradingActive()" [class.stopped]="!paperTradingActive()">
+        {{ paperTradingActive() ? 'ACTIVE' : 'UNAVAILABLE' }}
+      </span>
+    </div>
+    <div class="card">
+      <div class="label">Auto Trading Status</div>
+      <span
+        class="badge"
+        [class.running]="autoStatus()?.running"
+        [class.stopped]="!autoStatus()?.running"
+      >
+        {{ autoStatus()?.running ? 'RUNNING' : 'STOPPED' }}
+      </span>
+    </div>
+    <div class="card">
+      <div class="label">Backend Health</div>
+      <div class="value">{{ h.status }} ({{ h.uptime_seconds | number: '1.0-0' }}s uptime)</div>
+    </div>
+  </div>
+  <ng-template #statusLoading>
+    <div class="empty-state" *ngIf="!healthError()">Loading…</div>
+  </ng-template>
+</div>

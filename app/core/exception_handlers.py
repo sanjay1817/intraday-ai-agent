@@ -60,6 +60,7 @@ from app.options.exceptions import (
     InvalidLotQuantityError,
     InvalidOptionChainDataError,
     OptionChainFetchError,
+    OptionContractNotFoundError,
     OptionPositionNotFoundError,
     OptionRiskLimitExceededError,
     OptionsError,
@@ -67,6 +68,7 @@ from app.options.exceptions import (
     PremiumUnavailableError,
     StrikeNotFoundError,
     TradingModeNotEnabledError,
+    UnderlyingInstrumentNotFoundError,
     UnsupportedUnderlyingError,
 )
 
@@ -94,8 +96,10 @@ _STATUS_CODE_BY_EXCEPTION: tuple[tuple[type[Exception], int], ...] = (
     (PaperTradingError, 400),  # paper trading engine failed generically
     (TradingModeNotEnabledError, 400),  # options endpoint called without TRADING_MODE=OPTIONS
     (UnsupportedUnderlyingError, 400),  # requested underlying isn't in the configured set
+    (UnderlyingInstrumentNotFoundError, 404),  # broker's instrument master has no matching row
     (ExpiryNotFoundError, 404),  # no expiry available/matching the requested mode
     (StrikeNotFoundError, 404),  # no strike available for the request
+    (OptionContractNotFoundError, 404),  # selected expiry/strike/type has no chain instrument
     (PremiumUnavailableError, 502),  # broker LTP lookup for the selected contract failed
     (OptionsInfrastructureUnavailableError, 503),  # no OptionChainService configured (non-Angel-One broker)
     (InvalidOptionChainDataError, 502),  # chain data parsed to empty/nonsensical

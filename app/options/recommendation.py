@@ -23,13 +23,13 @@ from app.domain.exceptions.broker import BrokerAPIError, BrokerConnectionError
 from app.indicators.engine import IndicatorEngine
 from app.instructor.recommendation import RecommendationAction, generate_recommendation
 from app.market.ingestion import current_session_state, fetch_recent_candles
-from app.options.exceptions import PremiumUnavailableError
+from app.options.exceptions import OptionContractNotFoundError, PremiumUnavailableError
 from app.options.expiry_selector import ExpirySelector
 from app.options.models import ExpiryMode, OptionType, StrikeMode
 from app.options.option_chain_service import OptionChainService
-from app.options.option_symbol_builder import OptionSymbolBuilder
 from app.options.schemas import OptionRecommendation, OptionSignal
 from app.options.strike_selector import StrikeSelector
+from app.options.underlying_resolver import UnderlyingResolver
 from app.strategy.engine import StrategyEngine
 
 _ACTION_TO_OPTION_TYPE = {
@@ -48,6 +48,7 @@ async def generate_option_recommendation(
     broker: BrokerInterface,
     broker_name: BrokerName,
     option_chain_service: OptionChainService,
+    underlying_resolver: UnderlyingResolver,
     underlying: str,
     timeframe: HistoricalInterval,
     strike_mode: StrikeMode,
@@ -57,11 +58,15 @@ async def generate_option_recommendation(
     """Run the AI Signal Engine on `underlying` and translate its
     BUY/SELL/HOLD call into a recommended option contract (or `NO_TRADE`).
 
-    Flow: fetch recent candles for `underlying` -> run the same
+    Flow: resolve `underlying`'s own historical-data instrument via
+    `underlying_resolver` -> fetch recent candles for that resolved
+    `(exchange, tradingsymbol)` pair -> run the same
     Strategy-Engine-then-Instructor pipeline `app.api.v1.routers.signals`
-    uses -> map BUY/SELL/HOLD to CE/PE/NO_TRADE -> (for BUY/SELL only)
-    resolve an expiry and strike against `option_chain_service`'s chain
-    -> build the trading symbol -> look up its premium.
+    uses (labeled with `underlying`/`Exchange.NSE` for human-readable
+    output, independent of whatever the resolver actually returned) ->
+    map BUY/SELL/HOLD to CE/PE/NO_TRADE -> (for BUY/SELL only) resolve an
+    expiry and strike against `option_chain_service`'s chain -> build the
+    trading symbol -> look up its premium.
 
     Args:
         broker: The adapter to fetch candles/premium through.
@@ -70,9 +75,16 @@ async def generate_option_recommendation(
             why this isn't read off `broker` itself).
         option_chain_service: The shared `OptionChainService` to resolve
             `underlying`'s option chain against.
-        underlying: The index/stock underlying to analyze (e.g. `"NIFTY"`)
-            — also the `tradingsymbol` the candle fetch and strategy
-            engine analyze directly, on `Exchange.NSE`.
+        underlying_resolver: Resolves `underlying`'s display name (e.g.
+            `"NIFTY"`) to the `(Exchange, tradingsymbol)` pair the broker's
+            historical-data API actually understands for that instrument's
+            own spot price — see `app.options.underlying_resolver`. Not
+            used for anything else in this function: the strategy-engine
+            and instructor calls below still label their output with
+            `underlying`/`Exchange.NSE`, since those are purely
+            human-readable identifiers for the already-fetched candles,
+            not a second data-fetch.
+        underlying: The index/stock underlying to analyze (e.g. `"NIFTY"`).
         timeframe: The candle interval to analyze and recommend against.
         strike_mode: Which `StrikeSelector` mode to apply.
         expiry_mode: Which `ExpirySelector` mode to apply.
@@ -81,7 +93,10 @@ async def generate_option_recommendation(
             real current time.
 
     Raises:
-        NoHistoricalDataError: the broker had no candles for `underlying`.
+        UnderlyingInstrumentNotFoundError: `underlying_resolver` found no
+            matching instrument-master row for `underlying`.
+        NoHistoricalDataError: the broker had no candles for `underlying`'s
+            resolved instrument.
         InvalidHistoricalDataError: a returned candle failed validation.
         UnsupportedUnderlyingError: `underlying` isn't in
             `option_chain_service`'s configured underlyings set.
@@ -90,11 +105,15 @@ async def generate_option_recommendation(
             to zero usable instruments.
         ExpiryNotFoundError: no expiry satisfies `expiry_mode`.
         StrikeNotFoundError: no strike is available to select from.
+        OptionContractNotFoundError: the selected expiry/strike/option_type
+            has no matching instrument in the chain (should not happen in
+            practice — see that exception's own docstring).
         PremiumUnavailableError: the broker LTP lookup for the selected
             contract failed.
     """
 
-    candles = await fetch_recent_candles(broker, broker_name, Exchange.NSE, underlying, timeframe)
+    exchange, tradingsymbol = await underlying_resolver.resolve_historical_instrument(underlying)
+    candles = await fetch_recent_candles(broker, broker_name, exchange, tradingsymbol, timeframe)
 
     # Reuses the latest analyzed candle's close as the underlying LTP
     # instead of issuing a second `broker.ltp()` call: this keeps the
@@ -136,18 +155,29 @@ async def generate_option_recommendation(
     strikes = chain.strikes_for_expiry(expiry)
     strike = StrikeSelector(default_mode=strike_mode).select(strikes, underlying_ltp, option_type)
 
-    # Built via `OptionSymbolBuilder` (constructed) rather than
-    # `chain.instrument_for(...)` (chain-verified ground truth) — a
-    # deliberate Phase 2 simplification, not an oversight. It mirrors
-    # `OptionSymbolBuilder`'s own docstring caveat: prefer the chain's
-    # real rows when correctness against the broker's exact listed
-    # contract matters (e.g. before placing an order, which this
-    # endpoint never does). Since this endpoint only ever recommends,
-    # never places, the tiny risk of a builder/chain mismatch (e.g. a
-    # symbol-format edge case) has no execution consequence — it is a
-    # known, documented limitation to revisit if/when a future phase
-    # wires this into order placement.
-    tradingsymbol = OptionSymbolBuilder().build(underlying, expiry, strike, option_type)
+    # Uses the chain's own instrument row — the broker's real scrip-master
+    # `symbol` for this exact expiry/strike/option_type — rather than
+    # reconstructing one with `OptionSymbolBuilder`. This used to build a
+    # symbol from string formatting instead, which drifted from Angel
+    # One's actual convention (a 2-digit year, not 4 — see
+    # `OptionSymbolBuilder`'s own corrected docstring) and made every
+    # premium lookup fail with a broker "no instrument found" error even
+    # though the chain the symbol was supposedly derived from already had
+    # the correct one on hand. `option_chain_service.get_option_chain()`'s
+    # rows are ground truth from the broker; there is no reason to ever
+    # rebuild what it already returned. `expiry`/`strike` were themselves
+    # selected from this SAME chain's own `expiries()`/`strikes_for_expiry()`,
+    # so `instrument_for` failing here would mean the chain contradicted
+    # itself between two calls — see `OptionContractNotFoundError`'s
+    # docstring for why this is a defensive guard, not an expected path.
+    instrument = chain.instrument_for(expiry, strike, option_type)
+    if instrument is None:
+        raise OptionContractNotFoundError(
+            f"option chain for {underlying} has no instrument for expiry={expiry} "
+            f"strike={strike} option_type={option_type.value}",
+            underlying=underlying,
+        )
+    tradingsymbol = instrument.tradingsymbol
 
     try:
         quote = await broker.ltp(Exchange.NFO, tradingsymbol)
