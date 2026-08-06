@@ -76,8 +76,10 @@ from app.domain.exceptions.broker import (
     BrokerAuthenticationError,
     OrderRejectionError,
 )
+from app.core.logging import TRADE_LOGGER_NAME
 
 logger = structlog.get_logger(__name__)
+trade_logger = structlog.get_logger(TRADE_LOGGER_NAME)
 
 #: HTTP statuses SmartAPI sometimes (but not always — see `_is_token_expired`)
 #: uses for an expired/invalid access token.
@@ -594,15 +596,47 @@ class AngelOneAdapter(BaseBrokerAdapter):
 
         symboltoken = await self._resolve_token(order.exchange, order.tradingsymbol)
         payload = self._place_order_payload(order, symboltoken)
+        trade_logger.info(
+            "order_placement_requested",
+            broker=BrokerName.ANGEL_ONE.value,
+            side=order.transaction_type.value,
+            symbol=order.tradingsymbol,
+            exchange=order.exchange.value,
+            quantity=order.quantity,
+            order_type=order.order_type.value,
+            product=order.product.value,
+            price=order.price,
+        )
         try:
             body = await self._request(
                 "POST", "/rest/secure/angelbroking/order/v1/placeOrder", json=payload
             )
         except BrokerAPIError as exc:
+            trade_logger.warning(
+                "order_placement_failed",
+                broker=BrokerName.ANGEL_ONE.value,
+                side=order.transaction_type.value,
+                symbol=order.tradingsymbol,
+                exception=repr(exc),
+            )
             raise self._as_order_rejection(exc) from exc
         if not body.get("status"):
+            trade_logger.warning(
+                "order_placement_rejected",
+                broker=BrokerName.ANGEL_ONE.value,
+                side=order.transaction_type.value,
+                symbol=order.tradingsymbol,
+                response=body,
+            )
             raise self._rejection_from_body(body)
         data = body["data"]
+        trade_logger.info(
+            "order_placed",
+            broker=BrokerName.ANGEL_ONE.value,
+            side=order.transaction_type.value,
+            symbol=order.tradingsymbol,
+            order_id=data["orderid"],
+        )
         return OrderResponse(order_id=data["orderid"], broker=BrokerName.ANGEL_ONE, raw=data)
 
     async def modify_order(self, order_id: str, order: OrderRequest) -> OrderResponse:

@@ -52,6 +52,6 @@ docker/volumes/
 .DS_Store
 Thumbs.db
 
-# # --- Logs ---
-# *.log
-# logs/
+# --- Logs ---
+*.log
+logs/

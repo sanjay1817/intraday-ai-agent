@@ -40,6 +40,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import structlog
+
+from app.core.logging import TRADE_LOGGER_NAME
 from app.domain.enums.trading import Exchange, OrderSide, OrderStatus
 from app.domain.exceptions.paper import (
     InsufficientCashError,
@@ -63,6 +66,8 @@ _IMMEDIATE_ORDER_TYPES = frozenset({PaperOrderType.MARKET})
 _TRIGGER_ORDER_TYPES = frozenset(
     {PaperOrderType.STOP, PaperOrderType.STOP_LIMIT, PaperOrderType.TRAILING_STOP}
 )
+
+trade_logger = structlog.get_logger(TRADE_LOGGER_NAME)
 
 
 class OrderManager:
@@ -103,6 +108,19 @@ class OrderManager:
         resolved_now = now or datetime.now(UTC)
         order_id = str(uuid4())
 
+        trade_logger.info(
+            "order_placement_requested",
+            broker="paper",
+            side=request.side.value,
+            symbol=request.symbol,
+            exchange=request.exchange.value,
+            quantity=request.quantity,
+            order_type=request.order_type.value,
+            price=request.price,
+            current_price=current_price,
+            order_id=order_id,
+        )
+
         trigger_price = request.trigger_price
         if request.order_type is PaperOrderType.TRAILING_STOP:
             trigger_price = self._initial_trailing_trigger(
@@ -138,6 +156,14 @@ class OrderManager:
             try:
                 await self._portfolio.reserve_cash(amount)
             except InsufficientCashError as exc:
+                trade_logger.warning(
+                    "order_placement_rejected",
+                    broker="paper",
+                    side=order.side.value,
+                    symbol=order.symbol,
+                    order_id=order_id,
+                    reason=str(exc),
+                )
                 rejected = order.model_copy(
                     update={"status": OrderStatus.REJECTED, "status_message": str(exc)}
                 )
@@ -146,7 +172,18 @@ class OrderManager:
             self._reservations[order_id] = amount
 
         self._orders[order_id] = order
-        return await self._evaluate_and_settle(order, current_price, resolved_now)
+        settled_order, closed_trades = await self._evaluate_and_settle(
+            order, current_price, resolved_now
+        )
+        trade_logger.info(
+            "order_placed",
+            broker="paper",
+            side=settled_order.side.value,
+            symbol=settled_order.symbol,
+            order_id=settled_order.order_id,
+            status=settled_order.status.value,
+        )
+        return settled_order, closed_trades
 
     # -- cancel / modify ------------------------------------------------------------------
 

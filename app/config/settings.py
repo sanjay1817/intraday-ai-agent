@@ -102,6 +102,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     log_json: bool = False
 
+    #: Directory for the dated buy/sell trade log (one file per calendar
+    #: day, e.g. `trades-2026-08-06.log`), kept separate from the main
+    #: application log so order activity can be tracked/archived per day.
+    trade_log_dir: str = "logs/trades"
+
     #: Which configured broker (see `broker` below) `app.brokers.factory
     #: .get_broker_adapter` constructs when a caller (e.g. the Signal API)
     #: doesn't specify one explicitly. Defaults to Angel One — the only

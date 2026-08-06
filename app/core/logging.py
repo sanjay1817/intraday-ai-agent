@@ -26,13 +26,20 @@ Logs page) reads from.
 import logging
 import sys
 from collections import deque
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
+from pathlib import Path
 from typing import TextIO
 
 import structlog
 from pydantic import BaseModel, ConfigDict
 
 from app.config.settings import Settings
+
+#: Name of the dedicated stdlib logger that `TRADE_LOGGER_NAME` writes
+#: to, kept separate from the root logger's handlers so trade activity
+#: lands in its own dated file (see `_DatedFileHandler`) in addition to
+#: (via propagation) the normal console/ring-buffer output.
+TRADE_LOGGER_NAME = "trades"
 
 _SHARED_PROCESSORS: list[structlog.typing.Processor] = [
     structlog.contextvars.merge_contextvars,
@@ -84,6 +91,45 @@ class _RingBufferHandler(logging.Handler):
                 message=message,
             )
         )
+
+
+class _DatedFileHandler(logging.Handler):
+    """Writes records to `{log_dir}/trades-YYYY-MM-DD.log`, switching to
+    a new file the first time a record is emitted after midnight.
+
+    A plain `TimedRotatingFileHandler` was considered, but it names the
+    *current* day's file without a date suffix (only past days get one
+    on rollover); this always names the active file by date, so any
+    given day's trades live in one predictably-named file from the
+    start, whether or not the process is later restarted.
+    """
+
+    def __init__(self, log_dir: Path) -> None:
+        super().__init__()
+        self._log_dir = log_dir
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        self._current_date: date | None = None
+        self._file_handler: logging.FileHandler | None = None
+
+    def emit(self, record: logging.LogRecord) -> None:
+        today = datetime.now().date()
+        if today != self._current_date or self._file_handler is None:
+            self._rotate(today)
+        assert self._file_handler is not None  # narrowed by _rotate above
+        self._file_handler.setFormatter(self.formatter)
+        self._file_handler.emit(record)
+
+    def _rotate(self, today: date) -> None:
+        if self._file_handler is not None:
+            self._file_handler.close()
+        path = self._log_dir / f"trades-{today.isoformat()}.log"
+        self._file_handler = logging.FileHandler(path, encoding="utf-8")
+        self._current_date = today
+
+    def close(self) -> None:
+        if self._file_handler is not None:
+            self._file_handler.close()
+        super().close()
 
 
 def get_recent_logs(limit: int = 200) -> list[LogEntry]:
@@ -167,3 +213,25 @@ def configure_logging(settings: Settings, *, stream: TextIO | None = None) -> No
     root_logger.addHandler(handler)
     root_logger.addHandler(ring_buffer_handler)
     root_logger.setLevel(resolved_level)
+
+    # Dedicated dated trade log: attached only to the "trades" logger (not
+    # root), but that logger still propagates up to root so buy/sell
+    # entries also show up in the normal console output and the
+    # dashboard's Logs page — this handler just additionally captures
+    # them, per day, on disk.
+    trade_logger = logging.getLogger(TRADE_LOGGER_NAME)
+    for existing in list(trade_logger.handlers):
+        trade_logger.removeHandler(existing)
+        existing.close()
+    trade_file_formatter = structlog.stdlib.ProcessorFormatter(
+        foreign_pre_chain=_SHARED_PROCESSORS,
+        processors=[
+            structlog.stdlib.ProcessorFormatter.remove_processors_meta,
+            structlog.dev.ConsoleRenderer(colors=False),
+        ],
+    )
+    trade_file_handler = _DatedFileHandler(Path(settings.trade_log_dir))
+    trade_file_handler.setFormatter(trade_file_formatter)
+    trade_logger.addHandler(trade_file_handler)
+    trade_logger.setLevel(resolved_level)
+    trade_logger.propagate = True
