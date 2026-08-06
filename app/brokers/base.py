@@ -14,6 +14,7 @@ broker-specific request/response shapes. This is what "never duplicate
 broker logic" means in practice: shared behavior lives here exactly once.
 """
 
+import asyncio
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable, Sequence
 from datetime import datetime
@@ -170,6 +171,8 @@ class BaseBrokerAdapter(BrokerInterface, ABC):
         self._access_token: str | None = None
         self._refresh_token_value: str | None = None
         self._ws_client: ReconnectingWebSocketClient | None = None
+        self._refresh_lock = asyncio.Lock()
+        self._token_generation = 0
 
     @property
     def broker_name(self) -> BrokerName:
@@ -237,11 +240,30 @@ class BaseBrokerAdapter(BrokerInterface, ABC):
         except TokenExpiredError:
             if not retry_on_token_expiry:
                 raise
-            logger.info("broker_token_expired_refreshing", broker=self._broker_name.value, url=url)
-            await self.refresh_token()
+            await self._refresh_token_coalesced(url=url)
             return await self._send_once(method, url, authenticated=authenticated, **kwargs)
 
         raise AssertionError("unreachable: tenacity always returns or raises")  # pragma: no cover
+
+    async def _refresh_token_coalesced(self, *, url: str) -> None:
+        """Refresh the access token, collapsing concurrent callers into one call.
+
+        Angel One's `refreshToken` is single-use/rotating: if two coroutines
+        (e.g. the stock and options auto-trading loops) hit an expired token
+        at the same time and both call `refresh_token()`, the first consumes
+        the refresh token and the second gets it rejected as already-used,
+        raising `BrokerAuthenticationError` instead of actually refreshing.
+        Serializing on a lock and skipping the refresh if another waiter
+        already completed one avoids that race.
+        """
+
+        generation_before = self._token_generation
+        async with self._refresh_lock:
+            if self._token_generation != generation_before:
+                return
+            logger.info("broker_token_expired_refreshing", broker=self._broker_name.value, url=url)
+            await self.refresh_token()
+            self._token_generation += 1
 
     async def _send_once(
         self, method: str, url: str, *, authenticated: bool, **kwargs: Any
