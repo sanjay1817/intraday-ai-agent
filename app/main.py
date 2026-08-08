@@ -24,7 +24,10 @@ import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from pathlib import Path
+
 from app.api.v1.routers.auto import router as auto_router
+from app.api.v1.routers.backtest import router as backtest_router
 from app.api.v1.routers.health import router as health_router
 from app.api.v1.routers.logs import router as logs_router
 from app.api.v1.routers.options import router as options_router
@@ -32,6 +35,7 @@ from app.api.v1.routers.paper import router as paper_router
 from app.api.v1.routers.signals import router as signals_router
 from app.auto.models import AutoTradingConfig
 from app.auto.orchestrator import AutoTradingOrchestrator
+from app.backtest.session import BacktestOrchestrator
 from app.brokers.angel_one import AngelOneAdapter
 from app.brokers.angel_one_instruments import AngelOneInstrumentMaster
 from app.brokers.factory import get_broker_adapter
@@ -239,6 +243,23 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     else:
         logger.debug("auto_options_orchestrator_not_started")
 
+    # Historical Backtesting (see app/backtest): holds only a read-only
+    # `broker` reference (historical data only — never a live order
+    # call) and constructs a brand-new, isolated `PaperTradingEngine` per
+    # run internally, so it's safe to construct unconditionally here,
+    # independent of `DEFAULT_BROKER`/`trading_mode`. Options backtesting
+    # is only available when `option_chain_service`/`underlying_resolver`
+    # are configured (Angel One only, mirroring every other options
+    # feature's gating above) — `run_options_single` reports a clear 503
+    # rather than failing to construct when they're `None`.
+    app.state.backtest_orchestrator = BacktestOrchestrator(
+        broker,
+        settings.default_broker,
+        data_dir=Path(settings.backtest_data_dir),
+        option_chain_service=app.state.option_chain_service,
+        underlying_resolver=app.state.underlying_resolver,
+    )
+
     # Future startup steps (database engine connect, Redis client
     # connect, scheduler start, websocket manager start) belong here, in
     # dependency order, before `app.state.ready` is set.
@@ -303,6 +324,7 @@ def create_app() -> FastAPI:
     app.include_router(auto_router)
     app.include_router(logs_router)
     app.include_router(options_router)
+    app.include_router(backtest_router)
 
     return app
 

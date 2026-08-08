@@ -224,3 +224,120 @@ export interface HealthResponse {
   option_underlyings: string[];
   option_default_lot_size: number;
 }
+
+// -- Historical Backtesting (mirrors `app/backtest/dto.py`) ---------------------------------
+
+export interface TransactionCostModel {
+  brokerage_percent: number;
+  brokerage_max_per_order: number;
+  stt_percent: number;
+  exchange_txn_charge_percent: number;
+  sebi_charges_percent: number;
+  stamp_duty_percent: number;
+  gst_percent: number;
+  slippage_percent: number;
+}
+
+export interface BacktestRequest {
+  symbol: string;
+  exchange: Exchange;
+  historical_date: string; // YYYY-MM-DD
+  start_time?: string; // HH:MM:SS
+  end_time?: string; // HH:MM:SS
+  interval?: HistoricalInterval;
+  initial_capital: number;
+  confidence_threshold?: number;
+  capital_fraction_per_trade?: number;
+  cost_model?: Partial<TransactionCostModel>;
+}
+
+export interface OptionsBacktestRequest extends BacktestRequest {
+  strike_mode?: 'ATM' | 'ITM' | 'OTM';
+  expiry_mode?: 'NEAREST_WEEKLY' | 'NEXT_WEEKLY' | 'MONTHLY';
+}
+
+export interface BacktestTradeRecord {
+  trade_id: string;
+  symbol: string;
+  exchange: Exchange;
+  side: OrderSide;
+  quantity: number;
+  entry_time: string;
+  entry_signal_price: number;
+  entry_fill_price: number;
+  exit_time: string;
+  exit_signal_price: number;
+  exit_fill_price: number;
+  stop_loss: number | null;
+  target: number | null;
+  exit_reason: string;
+  gross_pnl: number;
+  charges: number;
+  slippage_cost: number;
+  net_pnl: number;
+  confidence: number | null;
+  strategy_signal: string;
+}
+
+export interface SignalLogEntry {
+  timestamp: string;
+  action: RecommendationAction;
+  confidence: number;
+  indicators: Record<string, number | null>;
+  reasoning: string;
+}
+
+export interface EquityPoint {
+  timestamp: string;
+  equity: number;
+  drawdown: number;
+  drawdown_percent: number;
+}
+
+export interface BacktestSummary {
+  initial_capital: number;
+  final_capital: number;
+  total_pnl: number;
+  total_pnl_percent: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  win_rate: number;
+  average_profit: number;
+  average_loss: number;
+  largest_win: number;
+  largest_loss: number;
+  max_drawdown: number;
+  max_drawdown_percent: number;
+  profit_factor: number | null;
+}
+
+export interface BacktestResult {
+  run_id: string;
+  request: BacktestRequest;
+  summary: BacktestSummary;
+  trades: BacktestTradeRecord[];
+  equity_curve: EquityPoint[];
+  signal_log: SignalLogEntry[];
+  warnings: string[];
+  disclaimer: string;
+  generated_at: string;
+}
+
+export interface AggregateBacktestSummary {
+  total_sessions: number;
+  total_trades: number;
+  winning_trades: number;
+  losing_trades: number;
+  total_pnl: number;
+  win_rate: number;
+  max_drawdown: number;
+}
+
+export interface AggregateBacktestResult {
+  run_id: string;
+  session_results: BacktestResult[];
+  aggregate: AggregateBacktestSummary;
+  disclaimer: string;
+  generated_at: string;
+}

@@ -42,6 +42,7 @@ from app.domain.exceptions import (
     PaperTradingError,
     ResearchError,
 )
+from app.domain.exceptions.backtest import BacktestError, FutureDateError
 from app.domain.exceptions.broker import (
     BrokerConnectionError,
     OrderRejectionError,
@@ -108,6 +109,8 @@ _STATUS_CODE_BY_EXCEPTION: tuple[tuple[type[Exception], int], ...] = (
     (InvalidLotQuantityError, 400),  # malformed lots request
     (OptionRiskLimitExceededError, 422),  # well-formed request, rejected by an options risk limit
     (OptionsError, 400),  # options integration failed generically
+    (FutureDateError, 400),  # backtest requested for a date that hasn't closed yet
+    (BacktestError, 400),  # historical backtest request failed generically
 )
 
 
@@ -205,4 +208,5 @@ def register_exception_handlers(app: FastAPI) -> None:
     app.add_exception_handler(MarketDataError, _handle_domain_error)
     app.add_exception_handler(PaperTradingError, _handle_domain_error)
     app.add_exception_handler(OptionsError, _handle_domain_error)
+    app.add_exception_handler(BacktestError, _handle_domain_error)
     app.add_exception_handler(Exception, _handle_unexpected_error)

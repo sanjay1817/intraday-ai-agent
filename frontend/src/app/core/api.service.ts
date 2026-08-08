@@ -3,9 +3,14 @@ import { Injectable } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import {
+  AggregateBacktestResult,
   AutoTradingStatus,
+  BacktestRequest,
+  BacktestResult,
+  BacktestTradeRecord,
   ClosedTrade,
   EmergencyStopResponse,
+  EquityPoint,
   Exchange,
   HealthResponse,
   HistoricalInterval,
@@ -14,10 +19,12 @@ import {
   OptionAutoTradingStatus,
   OptionRecommendation,
   OptionRiskStatus,
+  OptionsBacktestRequest,
   OptionTradeHistoryEntry,
   PaperOrder,
   PaperPosition,
-  Portfolio
+  Portfolio,
+  SignalLogEntry
 } from './models';
 
 // The Angular dev server runs on a different origin than the FastAPI
@@ -147,5 +154,42 @@ export class ApiService {
 
   getOptionAutoStatus(): Observable<OptionAutoTradingStatus> {
     return this.http.get<OptionAutoTradingStatus>(`${API_BASE}/options/auto/status`);
+  }
+
+  // -- historical backtesting --------------------------------------------------------------
+  // Every response here is a HISTORICAL BACKTEST -- see
+  // `app.backtest.dto.BACKTEST_DISCLAIMER` -- never live trading, never
+  // manual/automatic paper trading, and no real order is ever placed.
+
+  runBacktest(body: BacktestRequest): Observable<BacktestResult> {
+    return this.http.post<BacktestResult>(`${API_BASE}/backtest/run`, body);
+  }
+
+  runOptionsBacktest(body: OptionsBacktestRequest): Observable<BacktestResult> {
+    return this.http.post<BacktestResult>(`${API_BASE}/backtest/run-options`, body);
+  }
+
+  runBacktestBatch(bodies: BacktestRequest[]): Observable<AggregateBacktestResult> {
+    return this.http.post<AggregateBacktestResult>(`${API_BASE}/backtest/run-batch`, bodies);
+  }
+
+  getBacktestRuns(): Observable<string[]> {
+    return this.http.get<string[]>(`${API_BASE}/backtest/runs`);
+  }
+
+  getBacktestRun(runId: string): Observable<BacktestResult> {
+    return this.http.get<BacktestResult>(`${API_BASE}/backtest/runs/${runId}`);
+  }
+
+  getBacktestTrades(runId: string): Observable<BacktestTradeRecord[]> {
+    return this.http.get<BacktestTradeRecord[]>(`${API_BASE}/backtest/runs/${runId}/trades`);
+  }
+
+  getBacktestEquityCurve(runId: string): Observable<EquityPoint[]> {
+    return this.http.get<EquityPoint[]>(`${API_BASE}/backtest/runs/${runId}/equity-curve`);
+  }
+
+  getBacktestSignals(runId: string): Observable<SignalLogEntry[]> {
+    return this.http.get<SignalLogEntry[]>(`${API_BASE}/backtest/runs/${runId}/signals`);
   }
 }

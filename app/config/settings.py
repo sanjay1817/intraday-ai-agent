@@ -280,6 +280,13 @@ class Settings(BaseSettings):
     #: premium-percentage simplification as `auto_option_stop_loss_percent`.
     auto_option_target_percent: float = Field(default=50.0, gt=0)
 
+    #: Directory `app.backtest.session.BacktestOrchestrator` caches
+    #: downloaded historical candles under and persists completed
+    #: `BacktestResult`s to — this codebase has no database (see
+    #: `app.database`'s docstring), so backtest results are file-based,
+    #: matching `trade_log_dir`'s own convention.
+    backtest_data_dir: str = "data/backtest"
+
     @field_validator("paper_market_data_broker")
     @classmethod
     def _check_paper_market_data_broker_is_a_real_broker(cls, value: BrokerName) -> BrokerName:

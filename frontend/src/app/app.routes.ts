@@ -46,5 +46,10 @@ export const routes: Routes = [
         (m) => m.OptionsDashboardComponent
       )
   },
+  {
+    path: 'backtest',
+    loadComponent: () =>
+      import('./pages/backtest/backtest.component').then((m) => m.BacktestComponent)
+  },
   { path: '**', redirectTo: 'overview' }
 ];

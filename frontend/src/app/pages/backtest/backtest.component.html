@@ -1,0 +1,233 @@
+<h1>Historical Paper Trading / Backtesting</h1>
+
+<div class="disclaimer-banner">
+  HISTORICAL BACKTEST — NOT LIVE TRADING, NOT MANUAL PAPER TRADING. NO REAL ORDERS PLACED.
+  Simulated on historical candle data only.
+</div>
+
+<div class="card form-card">
+  <div class="form-grid">
+    <label>
+      <span class="label">Symbol</span>
+      <input type="text" [ngModel]="symbol()" (ngModelChange)="symbol.set($event)" />
+    </label>
+
+    <label>
+      <span class="label">Exchange</span>
+      <select [ngModel]="exchange()" (ngModelChange)="exchange.set($event)">
+        <option value="NSE">NSE</option>
+        <option value="BSE">BSE</option>
+      </select>
+    </label>
+
+    <label>
+      <span class="label">Historical Date</span>
+      <input
+        type="date"
+        [max]="maxDate"
+        [ngModel]="historicalDate()"
+        (ngModelChange)="historicalDate.set($event)"
+      />
+    </label>
+
+    <label>
+      <span class="label">Start Time</span>
+      <input type="time" [ngModel]="startTime()" (ngModelChange)="startTime.set($event)" />
+    </label>
+
+    <label>
+      <span class="label">End Time</span>
+      <input type="time" [ngModel]="endTime()" (ngModelChange)="endTime.set($event)" />
+    </label>
+
+    <label>
+      <span class="label">Candle Interval</span>
+      <select [ngModel]="interval()" (ngModelChange)="interval.set($event)">
+        <option value="1minute">1 minute</option>
+        <option value="3minute">3 minute</option>
+        <option value="5minute">5 minute</option>
+        <option value="15minute">15 minute</option>
+      </select>
+    </label>
+
+    <label>
+      <span class="label">Initial Capital (₹)</span>
+      <input
+        type="number"
+        min="1"
+        [ngModel]="initialCapital()"
+        (ngModelChange)="initialCapital.set($event)"
+      />
+    </label>
+
+    <label>
+      <span class="label">Confidence Threshold (%)</span>
+      <input
+        type="number"
+        min="0"
+        max="100"
+        [ngModel]="confidenceThreshold()"
+        (ngModelChange)="confidenceThreshold.set($event)"
+      />
+    </label>
+  </div>
+
+  <button class="run-button" [disabled]="running()" (click)="runBacktest()">
+    {{ running() ? 'Running…' : 'Run Backtest' }}
+  </button>
+
+  <div class="error-banner" *ngIf="error()">{{ error() }}</div>
+</div>
+
+<ng-container *ngIf="result() as res">
+  <div class="warnings-banner" *ngIf="res.warnings.length">
+    <strong>Limitations for this run:</strong>
+    <ul>
+      <li *ngFor="let warning of res.warnings">{{ warning }}</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h3>Summary</h3>
+    <div class="summary-grid">
+      <div class="stat">
+        <span class="label">Initial Capital</span>
+        <span class="value">{{ res.summary.initial_capital | number: '1.2-2' }}</span>
+      </div>
+      <div class="stat">
+        <span class="label">Final Capital</span>
+        <span class="value">{{ res.summary.final_capital | number: '1.2-2' }}</span>
+      </div>
+      <div class="stat">
+        <span class="label">Total P&amp;L</span>
+        <span class="value" [class.pnl-positive]="res.summary.total_pnl >= 0" [class.pnl-negative]="res.summary.total_pnl < 0">
+          {{ res.summary.total_pnl | number: '1.2-2' }} ({{ res.summary.total_pnl_percent | number: '1.2-2' }}%)
+        </span>
+      </div>
+      <div class="stat">
+        <span class="label">Total Trades</span>
+        <span class="value">{{ res.summary.total_trades }}</span>
+      </div>
+      <div class="stat">
+        <span class="label">Win / Loss</span>
+        <span class="value">{{ res.summary.winning_trades }} / {{ res.summary.losing_trades }}</span>
+      </div>
+      <div class="stat">
+        <span class="label">Win Rate</span>
+        <span class="value">{{ res.summary.win_rate | number: '1.1-1' }}%</span>
+      </div>
+      <div class="stat">
+        <span class="label">Avg Profit / Loss</span>
+        <span class="value">
+          {{ res.summary.average_profit | number: '1.2-2' }} / {{ res.summary.average_loss | number: '1.2-2' }}
+        </span>
+      </div>
+      <div class="stat">
+        <span class="label">Largest Win / Loss</span>
+        <span class="value">
+          {{ res.summary.largest_win | number: '1.2-2' }} / {{ res.summary.largest_loss | number: '1.2-2' }}
+        </span>
+      </div>
+      <div class="stat">
+        <span class="label">Max Drawdown</span>
+        <span class="value">
+          {{ res.summary.max_drawdown | number: '1.2-2' }} ({{ res.summary.max_drawdown_percent | number: '1.1-1' }}%)
+        </span>
+      </div>
+      <div class="stat">
+        <span class="label">Profit Factor</span>
+        <span class="value">{{ res.summary.profit_factor !== null ? (res.summary.profit_factor | number: '1.2-2') : '—' }}</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" *ngIf="res.equity_curve.length">
+    <h3>Equity Curve</h3>
+    <svg class="equity-chart" viewBox="0 0 600 120" preserveAspectRatio="none">
+      <path [attr.d]="equityPath(res)" fill="none" stroke="var(--accent)" stroke-width="2" />
+    </svg>
+  </div>
+
+  <div class="card">
+    <h3>Trades</h3>
+    <div class="table-wrap" *ngIf="res.trades.length; else noTrades">
+      <table>
+        <thead>
+          <tr>
+            <th>Side</th>
+            <th>Qty</th>
+            <th>Entry Time</th>
+            <th>Entry Price</th>
+            <th>Exit Time</th>
+            <th>Exit Price</th>
+            <th>Exit Reason</th>
+            <th>Gross P&amp;L</th>
+            <th>Charges</th>
+            <th>Net P&amp;L</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let trade of res.trades">
+            <td>
+              <span class="badge" [class.buy]="trade.side === 'BUY'" [class.sell]="trade.side === 'SELL'">
+                {{ trade.side }}
+              </span>
+            </td>
+            <td>{{ trade.quantity }}</td>
+            <td>{{ trade.entry_time | date: 'short' }}</td>
+            <td>{{ trade.entry_fill_price | number: '1.2-2' }}</td>
+            <td>{{ trade.exit_time | date: 'short' }}</td>
+            <td>{{ trade.exit_fill_price | number: '1.2-2' }}</td>
+            <td>{{ trade.exit_reason }}</td>
+            <td>{{ trade.gross_pnl | number: '1.2-2' }}</td>
+            <td>{{ trade.charges | number: '1.2-2' }}</td>
+            <td [class.pnl-positive]="trade.net_pnl >= 0" [class.pnl-negative]="trade.net_pnl < 0">
+              {{ trade.net_pnl | number: '1.2-2' }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <ng-template #noTrades>
+      <div class="empty-state">No trades were simulated for this session.</div>
+    </ng-template>
+  </div>
+
+  <div class="card">
+    <h3>Signal Log</h3>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Signal</th>
+            <th>Confidence</th>
+            <th>Indicators</th>
+            <th>Reasoning</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr *ngFor="let entry of res.signal_log">
+            <td>{{ entry.timestamp | date: 'shortTime' }}</td>
+            <td>
+              <span
+                class="badge"
+                [class.buy]="entry.action === 'BUY'"
+                [class.sell]="entry.action === 'SELL'"
+              >
+                {{ entry.action }}
+              </span>
+            </td>
+            <td>{{ entry.confidence | number: '1.0-0' }}%</td>
+            <td class="indicators-cell">
+              <span *ngFor="let key of entry.indicators | keyvalue">
+                {{ key.key }}: {{ key.value !== null ? (key.value | number: '1.2-2') : '—' }}
+              </span>
+            </td>
+            <td class="reasoning-cell">{{ entry.reasoning }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</ng-container>

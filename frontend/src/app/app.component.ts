@@ -27,7 +27,8 @@ export class AppComponent {
     { path: '/ai-signals', label: 'AI Signals' },
     { path: '/auto-status', label: 'Auto Trading' },
     { path: '/logs', label: 'Logs' },
-    { path: '/options', label: 'Options Dashboard' }
+    { path: '/options', label: 'Options Dashboard' },
+    { path: '/backtest', label: 'Historical Backtest' }
   ];
 
   readonly menuOpen = signal(false);

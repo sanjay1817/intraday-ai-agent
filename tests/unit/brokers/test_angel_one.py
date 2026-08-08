@@ -304,6 +304,68 @@ async def test_place_order_builds_request_and_parses_response() -> None:
     assert response.broker == BrokerName.ANGEL_ONE
 
 
+async def test_buy_then_sell_stock_places_both_orders_correctly() -> None:
+    """End-to-end-ish unit test: buy a stock, then sell it, via the Angel
+    One adapter's `place_order`, asserting each request is built with the
+    correct `transactiontype` and each response is parsed correctly.
+    """
+
+    captured_requests: list[dict[str, object]] = []
+    order_ids = iter(["230101000000001", "230101000000002"])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content.decode())
+        captured_requests.append(body)
+        return httpx.Response(
+            200, json={"status": True, "data": {"orderid": next(order_ids)}}
+        )
+
+    adapter = AngelOneAdapter(
+        make_credentials(),
+        make_fast_settings(),
+        http_client=make_client(handler),
+        instrument_resolver=_FakeResolver({(Exchange.NSE, "INFY-EQ"): "1594"}),
+    )
+    adapter._access_token = "tok"
+
+    buy_order = OrderRequest(
+        tradingsymbol="INFY-EQ",
+        exchange=Exchange.NSE,
+        transaction_type=OrderSide.BUY,
+        quantity=10,
+        order_type=OrderType.MARKET,
+        product=ProductType.DELIVERY,
+    )
+    buy_response = await adapter.place_order(buy_order)
+
+    sell_order = OrderRequest(
+        tradingsymbol="INFY-EQ",
+        exchange=Exchange.NSE,
+        transaction_type=OrderSide.SELL,
+        quantity=10,
+        order_type=OrderType.MARKET,
+        product=ProductType.DELIVERY,
+    )
+    sell_response = await adapter.place_order(sell_order)
+
+    assert len(captured_requests) == 2
+    buy_body, sell_body = captured_requests
+
+    assert buy_body["transactiontype"] == "BUY"
+    assert buy_body["tradingsymbol"] == "INFY-EQ"
+    assert buy_body["symboltoken"] == "1594"
+    assert buy_body["quantity"] == "10"
+    assert buy_response.order_id == "230101000000001"
+    assert buy_response.broker == BrokerName.ANGEL_ONE
+
+    assert sell_body["transactiontype"] == "SELL"
+    assert sell_body["tradingsymbol"] == "INFY-EQ"
+    assert sell_body["symboltoken"] == "1594"
+    assert sell_body["quantity"] == "10"
+    assert sell_response.order_id == "230101000000002"
+    assert sell_response.broker == BrokerName.ANGEL_ONE
+
+
 async def test_place_order_business_rejection_is_not_retried() -> None:
     calls = {"n": 0}
 
