@@ -78,6 +78,8 @@
         <th>Exit Time</th>
         <th>Exit Price</th>
         <th>Exit Reason</th>
+        <th>Confidence</th>
+        <th>Strategy Signal</th>
         <th>Gross P&amp;L</th>
         <th>Charges</th>
         <th>Net P&amp;L</th>
@@ -96,6 +98,8 @@
         <td>{{ trade.exit_time | date: 'short' }}</td>
         <td>{{ trade.exit_fill_price | number: '1.2-2' }}</td>
         <td>{{ trade.exit_reason }}</td>
+        <td>{{ trade.confidence !== null ? (trade.confidence | number: '1.0-0') + '%' : '—' }}</td>
+        <td class="reasoning-cell" [title]="trade.strategy_signal">{{ trade.strategy_signal || '—' }}</td>
         <td>{{ trade.gross_pnl | number: '1.2-2' }}</td>
         <td>{{ trade.charges | number: '1.2-2' }}</td>
         <td [class.pnl-positive]="trade.net_pnl >= 0" [class.pnl-negative]="trade.net_pnl < 0">
