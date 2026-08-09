@@ -1,0 +1,144 @@
+<div class="warnings-banner" *ngIf="result.warnings.length">
+  <strong>Limitations for this run:</strong>
+  <ul>
+    <li *ngFor="let warning of result.warnings">{{ warning }}</li>
+  </ul>
+</div>
+
+<div class="summary-grid">
+  <div class="stat">
+    <span class="label">Initial Capital</span>
+    <span class="value">{{ result.summary.initial_capital | number: '1.2-2' }}</span>
+  </div>
+  <div class="stat">
+    <span class="label">Final Capital</span>
+    <span class="value">{{ result.summary.final_capital | number: '1.2-2' }}</span>
+  </div>
+  <div class="stat">
+    <span class="label">Total P&amp;L</span>
+    <span
+      class="value"
+      [class.pnl-positive]="result.summary.total_pnl >= 0"
+      [class.pnl-negative]="result.summary.total_pnl < 0"
+    >
+      {{ result.summary.total_pnl | number: '1.2-2' }} ({{ result.summary.total_pnl_percent | number: '1.2-2' }}%)
+    </span>
+  </div>
+  <div class="stat">
+    <span class="label">Total Trades</span>
+    <span class="value">{{ result.summary.total_trades }}</span>
+  </div>
+  <div class="stat">
+    <span class="label">Win / Loss</span>
+    <span class="value">{{ result.summary.winning_trades }} / {{ result.summary.losing_trades }}</span>
+  </div>
+  <div class="stat">
+    <span class="label">Win Rate</span>
+    <span class="value">{{ result.summary.win_rate | number: '1.1-1' }}%</span>
+  </div>
+  <div class="stat">
+    <span class="label">Avg Profit / Loss</span>
+    <span class="value">
+      {{ result.summary.average_profit | number: '1.2-2' }} / {{ result.summary.average_loss | number: '1.2-2' }}
+    </span>
+  </div>
+  <div class="stat">
+    <span class="label">Largest Win / Loss</span>
+    <span class="value">
+      {{ result.summary.largest_win | number: '1.2-2' }} / {{ result.summary.largest_loss | number: '1.2-2' }}
+    </span>
+  </div>
+  <div class="stat">
+    <span class="label">Max Drawdown</span>
+    <span class="value">
+      {{ result.summary.max_drawdown | number: '1.2-2' }} ({{ result.summary.max_drawdown_percent | number: '1.1-1' }}%)
+    </span>
+  </div>
+  <div class="stat">
+    <span class="label">Profit Factor</span>
+    <span class="value">
+      {{ result.summary.profit_factor !== null ? (result.summary.profit_factor | number: '1.2-2') : '—' }}
+    </span>
+  </div>
+</div>
+
+<svg class="equity-chart" viewBox="0 0 600 120" preserveAspectRatio="none" *ngIf="result.equity_curve.length">
+  <path [attr.d]="equityPath" fill="none" stroke="var(--accent)" stroke-width="2" />
+</svg>
+
+<h4>Trades</h4>
+<div class="table-wrap" *ngIf="result.trades.length; else noTrades">
+  <table>
+    <thead>
+      <tr>
+        <th>Side</th>
+        <th>Qty</th>
+        <th>Entry Time</th>
+        <th>Entry Price</th>
+        <th>Exit Time</th>
+        <th>Exit Price</th>
+        <th>Exit Reason</th>
+        <th>Gross P&amp;L</th>
+        <th>Charges</th>
+        <th>Net P&amp;L</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr *ngFor="let trade of result.trades">
+        <td>
+          <span class="badge" [class.buy]="trade.side === 'BUY'" [class.sell]="trade.side === 'SELL'">
+            {{ trade.side }}
+          </span>
+        </td>
+        <td>{{ trade.quantity }}</td>
+        <td>{{ trade.entry_time | date: 'short' }}</td>
+        <td>{{ trade.entry_fill_price | number: '1.2-2' }}</td>
+        <td>{{ trade.exit_time | date: 'short' }}</td>
+        <td>{{ trade.exit_fill_price | number: '1.2-2' }}</td>
+        <td>{{ trade.exit_reason }}</td>
+        <td>{{ trade.gross_pnl | number: '1.2-2' }}</td>
+        <td>{{ trade.charges | number: '1.2-2' }}</td>
+        <td [class.pnl-positive]="trade.net_pnl >= 0" [class.pnl-negative]="trade.net_pnl < 0">
+          {{ trade.net_pnl | number: '1.2-2' }}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+</div>
+<ng-template #noTrades>
+  <div class="empty-state">No trades were simulated for this session.</div>
+</ng-template>
+
+<details class="signal-log-details">
+  <summary>Signal Log ({{ result.signal_log.length }} candles)</summary>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Signal</th>
+          <th>Confidence</th>
+          <th>Indicators</th>
+          <th>Reasoning</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr *ngFor="let entry of result.signal_log">
+          <td>{{ entry.timestamp | date: 'shortTime' }}</td>
+          <td>
+            <span class="badge" [class.buy]="entry.action === 'BUY'" [class.sell]="entry.action === 'SELL'">
+              {{ entry.action }}
+            </span>
+          </td>
+          <td>{{ entry.confidence | number: '1.0-0' }}%</td>
+          <td class="indicators-cell">
+            <span *ngFor="let key of entry.indicators | keyvalue">
+              {{ key.key }}: {{ key.value !== null ? (key.value | number: '1.2-2') : '—' }}
+            </span>
+          </td>
+          <td class="reasoning-cell">{{ entry.reasoning }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</details>

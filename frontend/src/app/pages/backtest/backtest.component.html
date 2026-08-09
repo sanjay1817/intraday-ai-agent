@@ -7,9 +7,14 @@
 
 <div class="card form-card">
   <div class="form-grid">
-    <label>
-      <span class="label">Symbol</span>
-      <input type="text" [ngModel]="symbol()" (ngModelChange)="symbol.set($event)" />
+    <label class="wide">
+      <span class="label">Equity Symbols (comma-separated)</span>
+      <input
+        type="text"
+        [ngModel]="symbolsInput()"
+        (ngModelChange)="symbolsInput.set($event)"
+        placeholder="SBIN-EQ, RELIANCE-EQ, TCS-EQ, INFY-EQ, ICICIBANK-EQ"
+      />
     </label>
 
     <label>
@@ -51,7 +56,7 @@
     </label>
 
     <label>
-      <span class="label">Initial Capital (₹)</span>
+      <span class="label">Initial Capital (₹, per symbol)</span>
       <input
         type="number"
         min="1"
@@ -70,6 +75,25 @@
         (ngModelChange)="confidenceThreshold.set($event)"
       />
     </label>
+
+    <label class="checkbox-label">
+      <input
+        type="checkbox"
+        [ngModel]="includeOptions()"
+        (ngModelChange)="includeOptions.set($event)"
+      />
+      <span class="label">Also backtest options (index underlyings)</span>
+    </label>
+
+    <label class="wide" *ngIf="includeOptions()">
+      <span class="label">Option Underlyings (comma-separated)</span>
+      <input
+        type="text"
+        [ngModel]="optionUnderlyingsInput()"
+        (ngModelChange)="optionUnderlyingsInput.set($event)"
+        placeholder="NIFTY, BANKNIFTY, FINNIFTY"
+      />
+    </label>
   </div>
 
   <button class="run-button" [disabled]="running()" (click)="runBacktest()">
@@ -79,155 +103,67 @@
   <div class="error-banner" *ngIf="error()">{{ error() }}</div>
 </div>
 
-<ng-container *ngIf="result() as res">
-  <div class="warnings-banner" *ngIf="res.warnings.length">
-    <strong>Limitations for this run:</strong>
-    <ul>
-      <li *ngFor="let warning of res.warnings">{{ warning }}</li>
-    </ul>
-  </div>
+<!-- ============================== EQUITY RESULTS ============================== -->
 
-  <div class="card">
-    <h3>Summary</h3>
-    <div class="summary-grid">
-      <div class="stat">
-        <span class="label">Initial Capital</span>
-        <span class="value">{{ res.summary.initial_capital | number: '1.2-2' }}</span>
-      </div>
-      <div class="stat">
-        <span class="label">Final Capital</span>
-        <span class="value">{{ res.summary.final_capital | number: '1.2-2' }}</span>
-      </div>
-      <div class="stat">
-        <span class="label">Total P&amp;L</span>
-        <span class="value" [class.pnl-positive]="res.summary.total_pnl >= 0" [class.pnl-negative]="res.summary.total_pnl < 0">
-          {{ res.summary.total_pnl | number: '1.2-2' }} ({{ res.summary.total_pnl_percent | number: '1.2-2' }}%)
-        </span>
-      </div>
-      <div class="stat">
-        <span class="label">Total Trades</span>
-        <span class="value">{{ res.summary.total_trades }}</span>
-      </div>
-      <div class="stat">
-        <span class="label">Win / Loss</span>
-        <span class="value">{{ res.summary.winning_trades }} / {{ res.summary.losing_trades }}</span>
-      </div>
-      <div class="stat">
-        <span class="label">Win Rate</span>
-        <span class="value">{{ res.summary.win_rate | number: '1.1-1' }}%</span>
-      </div>
-      <div class="stat">
-        <span class="label">Avg Profit / Loss</span>
-        <span class="value">
-          {{ res.summary.average_profit | number: '1.2-2' }} / {{ res.summary.average_loss | number: '1.2-2' }}
-        </span>
-      </div>
-      <div class="stat">
-        <span class="label">Largest Win / Loss</span>
-        <span class="value">
-          {{ res.summary.largest_win | number: '1.2-2' }} / {{ res.summary.largest_loss | number: '1.2-2' }}
-        </span>
-      </div>
-      <div class="stat">
-        <span class="label">Max Drawdown</span>
-        <span class="value">
-          {{ res.summary.max_drawdown | number: '1.2-2' }} ({{ res.summary.max_drawdown_percent | number: '1.1-1' }}%)
-        </span>
-      </div>
-      <div class="stat">
-        <span class="label">Profit Factor</span>
-        <span class="value">{{ res.summary.profit_factor !== null ? (res.summary.profit_factor | number: '1.2-2') : '—' }}</span>
-      </div>
+<div class="card" *ngIf="equityAggregate() as agg">
+  <h3>Equity — Combined Across {{ agg.total_sessions }} Symbol(s)</h3>
+  <div class="summary-grid">
+    <div class="stat">
+      <span class="label">Total Trades</span>
+      <span class="value">{{ agg.total_trades }}</span>
+    </div>
+    <div class="stat">
+      <span class="label">Win / Loss</span>
+      <span class="value">{{ agg.winning_trades }} / {{ agg.losing_trades }}</span>
+    </div>
+    <div class="stat">
+      <span class="label">Win Rate</span>
+      <span class="value">{{ agg.win_rate | number: '1.1-1' }}%</span>
+    </div>
+    <div class="stat">
+      <span class="label">Total P&amp;L</span>
+      <span class="value" [class.pnl-positive]="agg.total_pnl >= 0" [class.pnl-negative]="agg.total_pnl < 0">
+        {{ agg.total_pnl | number: '1.2-2' }}
+      </span>
+    </div>
+    <div class="stat">
+      <span class="label">Max Drawdown (any session)</span>
+      <span class="value">{{ agg.max_drawdown | number: '1.2-2' }}</span>
     </div>
   </div>
+</div>
 
-  <div class="card" *ngIf="res.equity_curve.length">
-    <h3>Equity Curve</h3>
-    <svg class="equity-chart" viewBox="0 0 600 120" preserveAspectRatio="none">
-      <path [attr.d]="equityPath(res)" fill="none" stroke="var(--accent)" stroke-width="2" />
-    </svg>
-  </div>
+<details class="card result-details" *ngFor="let res of equityResults()" [open]="equityResults().length <= 1">
+  <summary>
+    <strong>{{ res.request.symbol }}</strong>
+    — {{ res.summary.total_trades }} trade(s),
+    P&amp;L
+    <span [class.pnl-positive]="res.summary.total_pnl >= 0" [class.pnl-negative]="res.summary.total_pnl < 0">
+      {{ res.summary.total_pnl | number: '1.2-2' }}
+    </span>
+  </summary>
 
-  <div class="card">
-    <h3>Trades</h3>
-    <div class="table-wrap" *ngIf="res.trades.length; else noTrades">
-      <table>
-        <thead>
-          <tr>
-            <th>Side</th>
-            <th>Qty</th>
-            <th>Entry Time</th>
-            <th>Entry Price</th>
-            <th>Exit Time</th>
-            <th>Exit Price</th>
-            <th>Exit Reason</th>
-            <th>Gross P&amp;L</th>
-            <th>Charges</th>
-            <th>Net P&amp;L</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let trade of res.trades">
-            <td>
-              <span class="badge" [class.buy]="trade.side === 'BUY'" [class.sell]="trade.side === 'SELL'">
-                {{ trade.side }}
-              </span>
-            </td>
-            <td>{{ trade.quantity }}</td>
-            <td>{{ trade.entry_time | date: 'short' }}</td>
-            <td>{{ trade.entry_fill_price | number: '1.2-2' }}</td>
-            <td>{{ trade.exit_time | date: 'short' }}</td>
-            <td>{{ trade.exit_fill_price | number: '1.2-2' }}</td>
-            <td>{{ trade.exit_reason }}</td>
-            <td>{{ trade.gross_pnl | number: '1.2-2' }}</td>
-            <td>{{ trade.charges | number: '1.2-2' }}</td>
-            <td [class.pnl-positive]="trade.net_pnl >= 0" [class.pnl-negative]="trade.net_pnl < 0">
-              {{ trade.net_pnl | number: '1.2-2' }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-    <ng-template #noTrades>
-      <div class="empty-state">No trades were simulated for this session.</div>
-    </ng-template>
-  </div>
+  <app-backtest-result [result]="res"></app-backtest-result>
+</details>
 
-  <div class="card">
-    <h3>Signal Log</h3>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Time</th>
-            <th>Signal</th>
-            <th>Confidence</th>
-            <th>Indicators</th>
-            <th>Reasoning</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr *ngFor="let entry of res.signal_log">
-            <td>{{ entry.timestamp | date: 'shortTime' }}</td>
-            <td>
-              <span
-                class="badge"
-                [class.buy]="entry.action === 'BUY'"
-                [class.sell]="entry.action === 'SELL'"
-              >
-                {{ entry.action }}
-              </span>
-            </td>
-            <td>{{ entry.confidence | number: '1.0-0' }}%</td>
-            <td class="indicators-cell">
-              <span *ngFor="let key of entry.indicators | keyvalue">
-                {{ key.key }}: {{ key.value !== null ? (key.value | number: '1.2-2') : '—' }}
-              </span>
-            </td>
-            <td class="reasoning-cell">{{ entry.reasoning }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</ng-container>
+<!-- ============================== OPTIONS RESULTS ============================== -->
+
+<details
+  class="card result-details"
+  *ngFor="let outcome of optionsResults()"
+  [open]="optionsResults().length <= 1"
+>
+  <summary>
+    <strong>{{ outcome.underlying }} (Options)</strong>
+    <ng-container *ngIf="outcome.result as res">
+      — {{ res.summary.total_trades }} trade(s), P&amp;L
+      <span [class.pnl-positive]="res.summary.total_pnl >= 0" [class.pnl-negative]="res.summary.total_pnl < 0">
+        {{ res.summary.total_pnl | number: '1.2-2' }}
+      </span>
+    </ng-container>
+    <span class="error-inline" *ngIf="outcome.error">— failed: {{ outcome.error }}</span>
+  </summary>
+
+  <app-backtest-result *ngIf="outcome.result as res" [result]="res"></app-backtest-result>
+  <div class="error-banner" *ngIf="outcome.error">{{ outcome.error }}</div>
+</details>
