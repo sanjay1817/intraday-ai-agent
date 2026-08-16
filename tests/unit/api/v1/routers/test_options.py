@@ -567,6 +567,7 @@ def _auto_options_orchestrator() -> AutoOptionsOrchestrator:
             strike_mode=StrikeMode.ATM,
             expiry_mode=ExpiryMode.NEAREST_WEEKLY,
             confidence_threshold=60.0,
+            min_confirmations=1,
             max_open_positions=3,
             lots_per_trade=1,
             scan_interval_seconds=30.0,

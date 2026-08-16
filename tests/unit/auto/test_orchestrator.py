@@ -241,6 +241,7 @@ def make_signal(
     entry: float = 1500.0,
     stop_loss: float | None = None,
     targets: list[float] | None = None,
+    confirmation_count: int = 2,
 ) -> AutoSignal:
     recommendation = make_recommendation(
         symbol=symbol,
@@ -250,6 +251,7 @@ def make_signal(
         stop_loss=stop_loss,
         targets=targets,
     )
+    agreeing_strategies = ["ema_trend", "vwap_volume_breakout"][:confirmation_count]
     confluence = ConfluenceResult(
         symbol=symbol,
         timeframe=HistoricalInterval.FIVE_MINUTE,
@@ -258,9 +260,9 @@ def make_signal(
             if action is RecommendationAction.BUY
             else ("BEARISH" if action is RecommendationAction.SELL else "NONE")
         ),
-        agreeing_strategies=["ema_trend", "vwap_volume_breakout"],
+        agreeing_strategies=agreeing_strategies,
         conflicting_strategies=["rsi_macd_reversal"],
-        confirmation_count=2,
+        confirmation_count=confirmation_count,
         combined_confidence=confidence,
         signals=[],
     )
@@ -339,6 +341,36 @@ async def test_confidence_below_threshold_skips_entry() -> None:
     await orchestrator._run_cycle(now=_T0)
 
     assert await engine.get_position("INFY-EQ", Exchange.NSE) is None
+
+
+async def test_insufficient_confirmation_skips_entry() -> None:
+    """Only 1 of 3 strategies agreeing (the other two returned NONE)
+    still makes `direction` BULLISH under `_merge_into_confluence`'s
+    majority vote (1 > 0) -- `min_confirmations` (2 of 3 by default)
+    closes that gap so a lone strategy can't trigger a live entry.
+    """
+
+    orchestrator, _, provider, engine = make_orchestrator()
+    provider.queue(
+        "INFY-EQ",
+        make_signal(action=RecommendationAction.BUY, confidence=80.0, confirmation_count=1),
+    )
+
+    await orchestrator._run_cycle(now=_T0)
+
+    assert await engine.get_position("INFY-EQ", Exchange.NSE) is None
+
+
+async def test_confirmation_at_configured_minimum_enters() -> None:
+    orchestrator, _, provider, engine = make_orchestrator(min_confirmations=1)
+    provider.queue(
+        "INFY-EQ",
+        make_signal(action=RecommendationAction.BUY, confidence=80.0, confirmation_count=1),
+    )
+
+    await orchestrator._run_cycle(now=_T0)
+
+    assert await engine.get_position("INFY-EQ", Exchange.NSE) is not None
 
 
 async def test_existing_position_prevents_duplicate_entry() -> None:

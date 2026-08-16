@@ -29,6 +29,11 @@ class AutoTradingConfig(BaseModel):
     exchange: Exchange = Exchange.NSE
     interval: HistoricalInterval = HistoricalInterval.FIVE_MINUTE
     confidence_threshold: float = Field(default=60.0, ge=0, le=100)
+    #: Minimum `ConfluenceResult.confirmation_count` (how many of the
+    #: Strategy Engine's registered strategies agree) required before a
+    #: new entry is placed — "2 of 3" by default. See
+    #: `app.config.settings.Settings.auto_min_confirmations`.
+    min_confirmations: int = Field(default=2, ge=1)
     max_open_positions: int = Field(default=3, gt=0)
     max_daily_trades: int = Field(default=10, gt=0)
     max_daily_loss: float = Field(default=5000.0, gt=0)

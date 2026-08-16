@@ -133,6 +133,11 @@ class AutoOptionsConfig:
     strike_mode: StrikeMode
     expiry_mode: ExpiryMode
     confidence_threshold: float
+    #: The options equivalent of `app.auto.models.AutoTradingConfig
+    #: .min_confirmations` — minimum `OptionRecommendation
+    #: .confirmation_count` required before a new entry is placed. See
+    #: `app.config.settings.Settings.auto_option_min_confirmations`.
+    min_confirmations: int
     max_open_positions: int
     lots_per_trade: int
     scan_interval_seconds: float
@@ -364,6 +369,16 @@ class AutoOptionsOrchestrator:
                 reason="confidence_below_threshold",
                 confidence=recommendation.confidence,
                 threshold=self._config.confidence_threshold,
+            )
+            return
+
+        if recommendation.confirmation_count < self._config.min_confirmations:
+            logger.info(
+                "auto_option_trade_skipped",
+                underlying=underlying,
+                reason="insufficient_strategy_confirmation",
+                confirmation_count=recommendation.confirmation_count,
+                min_confirmations=self._config.min_confirmations,
             )
             return
 

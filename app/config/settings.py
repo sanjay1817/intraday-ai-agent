@@ -168,6 +168,16 @@ class Settings(BaseSettings):
     #: as a reversal strong enough to exit an existing position.
     auto_confidence_threshold: float = Field(default=60.0, ge=0, le=100)
 
+    #: Minimum number of the Strategy Engine's registered strategies
+    #: (currently 3 — `EMATrendStrategy`/`RSIMACDReversalStrategy`/
+    #: `VWAPVolumeBreakoutStrategy`) that must agree on a direction before
+    #: the orchestrator acts on it as a new entry — "2 of 3" by default.
+    #: `_merge_into_confluence`'s majority vote already guarantees a
+    #: BULLISH/BEARISH `direction` has *more* agreeing strategies than
+    #: conflicting ones, but with 3 strategies that only requires 1 of 3
+    #: when the other two return NONE (1 > 0); this closes that gap.
+    auto_min_confirmations: int = Field(default=2, ge=1)
+
     max_open_positions: int = Field(default=3, gt=0)
     max_daily_trades: int = Field(default=10, gt=0)
     max_daily_loss: float = Field(default=5000.0, gt=0)
@@ -263,6 +273,12 @@ class Settings(BaseSettings):
     #: acts on for a new entry — the options equivalent of
     #: `auto_confidence_threshold` above.
     auto_option_confidence_threshold: float = Field(default=60.0, ge=0, le=100)
+
+    #: The options equivalent of `auto_min_confirmations` above —
+    #: `AutoOptionsOrchestrator` requires at least this many of the
+    #: Strategy Engine's registered strategies to agree before entering
+    #: a new option position.
+    auto_option_min_confirmations: int = Field(default=2, ge=1)
 
     #: Fixed lot count `AutoOptionsOrchestrator` requests for every entry
     #: it places — no dynamic position-sizing-by-capital logic in this

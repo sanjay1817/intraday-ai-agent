@@ -123,6 +123,7 @@ def test_auto_trading_settings_defaults() -> None:
     assert settings.auto_trading_enabled is False
     assert settings.auto_symbols == []
     assert settings.auto_confidence_threshold == 60.0
+    assert settings.auto_min_confirmations == 2
     assert settings.max_open_positions == 3
     assert settings.max_daily_trades == 10
     assert settings.max_daily_loss == 5000.0
@@ -148,6 +149,7 @@ def test_auto_trading_settings_are_overridable() -> None:
         auto_trading_enabled=True,
         auto_symbols=["SBIN-EQ"],
         auto_confidence_threshold=75.0,
+        auto_min_confirmations=3,
         max_open_positions=5,
         max_daily_trades=20,
         max_daily_loss=10_000.0,
@@ -156,6 +158,7 @@ def test_auto_trading_settings_are_overridable() -> None:
     assert settings.auto_trading_enabled is True
     assert settings.auto_symbols == ["SBIN-EQ"]
     assert settings.auto_confidence_threshold == 75.0
+    assert settings.auto_min_confirmations == 3
     assert settings.max_open_positions == 5
     assert settings.max_daily_trades == 20
     assert settings.max_daily_loss == 10_000.0

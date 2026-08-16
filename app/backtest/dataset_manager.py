@@ -28,9 +28,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
+from uuid import uuid4
 
 import structlog
 from pydantic import ValidationError
@@ -177,9 +179,23 @@ class BrokerHistoricalDataProvider:
         to_date: datetime,
         candles: list[MarketCandle],
     ) -> None:
+        """Write the cache file atomically: two concurrent requests for
+        the same symbol/interval/date-range (e.g. several backtest runs
+        fired in parallel from the UI) must never be able to interleave
+        their writes into one torn/corrupted JSON file that a later read
+        would silently accept as valid. Writing to a uniquely-named
+        temp file in the same directory, then `os.replace`-ing it over
+        the real path, means every concurrent writer either fully wins
+        or is fully overwritten by whichever wrote last — never a partial
+        result.
+        """
+
         path = self._cache_path(symbol, exchange, interval, from_date, to_date)
         if path is None:
             return
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = [json.loads(candle.model_dump_json()) for candle in candles]
-        path.write_text(json.dumps(payload), encoding="utf-8")
+
+        tmp_path = path.with_name(f"{path.name}.{uuid4().hex}.tmp")
+        tmp_path.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp_path, path)

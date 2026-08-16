@@ -96,6 +96,14 @@ class OptionRecommendation(BaseModel):
     premium: float | None = None
     underlying_ltp: float
     confidence: float = Field(ge=0, le=100)
+    #: Copied straight from the `InstructorRecommendation` this
+    #: recommendation was translated from — how many of the Strategy
+    #: Engine's registered strategies agreed on `signal`'s direction, out
+    #: of `total_strategy_count`. Lets `AutoOptionsOrchestrator` gate
+    #: entries on confirmation strength the same way
+    #: `AutoTradingOrchestrator` does for equity.
+    confirmation_count: int = Field(default=0, ge=0)
+    total_strategy_count: int = Field(default=0, ge=0)
     reasoning: str = Field(min_length=1)
     generated_at: datetime
 

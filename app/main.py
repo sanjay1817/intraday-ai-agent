@@ -137,6 +137,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         config=AutoTradingConfig(
             symbols=settings.auto_symbols,
             confidence_threshold=settings.auto_confidence_threshold,
+            min_confirmations=settings.auto_min_confirmations,
             max_open_positions=settings.max_open_positions,
             max_daily_trades=settings.max_daily_trades,
             max_daily_loss=settings.max_daily_loss,
@@ -225,6 +226,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
                 strike_mode=StrikeMode(settings.option_strike_mode),
                 expiry_mode=ExpiryMode(settings.option_expiry_mode),
                 confidence_threshold=settings.auto_option_confidence_threshold,
+                min_confirmations=settings.auto_option_min_confirmations,
                 max_open_positions=settings.auto_max_open_option_positions,
                 lots_per_trade=settings.auto_option_lots_per_trade,
                 scan_interval_seconds=settings.auto_option_scan_interval_seconds,

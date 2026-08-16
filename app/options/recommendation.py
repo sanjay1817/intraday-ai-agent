@@ -143,6 +143,8 @@ async def generate_option_recommendation(
             signal=OptionSignal.NO_TRADE,
             underlying_ltp=underlying_ltp,
             confidence=instructor_rec.confidence,
+            confirmation_count=instructor_rec.confirmation_count,
+            total_strategy_count=instructor_rec.total_strategy_count,
             reasoning=instructor_rec.reasoning,
             generated_at=instructor_rec.generated_at,
         )
@@ -202,6 +204,8 @@ async def generate_option_recommendation(
         premium=premium,
         underlying_ltp=underlying_ltp,
         confidence=instructor_rec.confidence,
+        confirmation_count=instructor_rec.confirmation_count,
+        total_strategy_count=instructor_rec.total_strategy_count,
         reasoning=reasoning,
         generated_at=instructor_rec.generated_at,
     )

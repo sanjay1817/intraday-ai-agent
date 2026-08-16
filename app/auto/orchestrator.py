@@ -385,6 +385,16 @@ class AutoTradingOrchestrator:
             )
             return
 
+        if signal.confluence.confirmation_count < self._config.min_confirmations:
+            logger.info(
+                "auto_trade_skipped",
+                symbol=symbol,
+                reason="insufficient_strategy_confirmation",
+                confirmation_count=signal.confluence.confirmation_count,
+                min_confirmations=self._config.min_confirmations,
+            )
+            return
+
         if await self._engine.get_position(symbol, exchange) is not None:
             logger.info("auto_trade_skipped", symbol=symbol, reason="position_already_open")
             return
