@@ -595,6 +595,38 @@ async def test_historical_data_parses_candles() -> None:
     assert bars[1].close == 107.0
 
 
+async def test_historical_data_raises_broker_api_error_on_status_false() -> None:
+    """A `"status": false` business error (bad date range, bad symboltoken,
+    etc.) must surface with SmartAPI's own message/errorcode, not be
+    silently swallowed as "zero candles" the way an empty `"data"` array
+    on a `"status": true` response legitimately is.
+    """
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={"status": False, "message": "Invalid Date Format", "errorcode": "AB1004"},
+        )
+
+    adapter = AngelOneAdapter(
+        make_credentials(),
+        make_fast_settings(),
+        http_client=make_client(handler),
+        instrument_resolver=_FakeResolver({(Exchange.NSE, "INFY-EQ"): "1594"}),
+    )
+    adapter._access_token = "tok"
+
+    with pytest.raises(BrokerAPIError, match="Invalid Date Format") as exc_info:
+        await adapter.historical_data(
+            Exchange.NSE,
+            "INFY-EQ",
+            HistoricalInterval.ONE_DAY,
+            datetime(2024, 1, 1, 9, 15),
+            datetime(2024, 1, 2, 15, 30),
+        )
+    assert exc_info.value.error_code == "AB1004"
+
+
 # -- WebSocket streaming ----------------------------------------------------------------
 
 

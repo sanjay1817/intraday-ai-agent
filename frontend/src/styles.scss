@@ -191,3 +191,13 @@ th {
   margin-bottom: 1rem;
   font-size: 13px;
 }
+
+.hint-banner {
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+  color: var(--amber);
+  border: 1px solid color-mix(in srgb, var(--amber) 30%, transparent);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  margin-bottom: 1rem;
+  font-size: 13px;
+}

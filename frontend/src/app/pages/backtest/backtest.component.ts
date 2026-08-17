@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { Component, inject, signal } from '@angular/core';
+import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { catchError, finalize, forkJoin, map, of } from 'rxjs';
 
@@ -38,6 +38,22 @@ function extractErrorMessage(err: unknown): string {
   const anyErr = err as { error?: { error?: { message?: string } }; message?: string };
   return anyErr?.error?.error?.message ?? anyErr?.message ?? 'Backtest run failed.';
 }
+
+// Matches `NoHistoricalDataError`'s own message shape from the backend
+// (see `app/domain/exceptions/market.py`) -- "broker call succeeded but
+// returned zero bars", which in practice almost always means either the
+// selected date had no trading session (a holiday/weekend) or the date
+// is one the broker's historical data doesn't cover yet (most commonly:
+// this machine's system clock is running ahead of the real date, so
+// "today" in the date picker's default is itself invalid).
+const NO_HISTORICAL_DATA_PATTERN = /no historical data returned/i;
+
+const NO_HISTORICAL_DATA_HINT =
+  "No candles came back for the selected date. That usually means either the exchange had no " +
+  "trading session that day (a holiday or weekend), or the date is outside what the broker's " +
+  "historical data actually covers -- worth checking this machine's system clock isn't running " +
+  'ahead of the real date (which would make "today" itself an invalid selection), and trying an ' +
+  'earlier weekday.';
 
 @Component({
   selector: 'app-backtest',
@@ -79,6 +95,17 @@ export class BacktestComponent {
   readonly equityAggregate = signal<AggregateBacktestSummary | null>(null);
 
   readonly optionsResults = signal<OptionsRunOutcome[]>([]);
+
+  // Derived, not stored separately -- recomputes automatically whenever
+  // `error`/`optionsResults` change, so a fresh run's results replace a
+  // stale hint without any manual reset.
+  readonly noHistoricalDataHint = computed<string | null>(() => {
+    const equityHit = NO_HISTORICAL_DATA_PATTERN.test(this.error() ?? '');
+    const optionsHit = this.optionsResults().some(
+      (outcome) => outcome.error !== null && NO_HISTORICAL_DATA_PATTERN.test(outcome.error)
+    );
+    return equityHit || optionsHit ? NO_HISTORICAL_DATA_HINT : null;
+  });
 
   private parseList(input: string): string[] {
     return input

@@ -101,6 +101,7 @@
   </button>
 
   <div class="error-banner" *ngIf="error()">{{ error() }}</div>
+  <div class="hint-banner" *ngIf="noHistoricalDataHint() as hint">{{ hint }}</div>
 </div>
 
 <!-- ============================== EQUITY RESULTS ============================== -->

@@ -810,6 +810,22 @@ class AngelOneAdapter(BaseBrokerAdapter):
         body = await self._request(
             "POST", "/rest/secure/angelbroking/historical/v1/getCandleData", json=payload
         )
+        # Unlike `place_order`/`modify_order`/`cancel_order`, this used to
+        # skip the `body.get("status")` check entirely and treat ANY
+        # response as zero candles, silently discarding SmartAPI's actual
+        # `message`/`errorcode` for a genuine `"status": false` business
+        # error (e.g. an invalid date range, a bad `symboltoken`, a rate
+        # limit) — the caller then saw only a generic
+        # `NoHistoricalDataError`, indistinguishable from a real "no
+        # trading activity in this window" response. Surfacing the real
+        # error here (mirroring the other endpoints' pattern) makes that
+        # distinction visible instead of masking it.
+        if body.get("status") is False:
+            raise BrokerAPIError(
+                str(body.get("message") or "historical data request failed"),
+                broker=BrokerName.ANGEL_ONE,
+                error_code=body.get("errorcode"),
+            )
         candles = body.get("data") or []
         return [
             HistoricalBar(
