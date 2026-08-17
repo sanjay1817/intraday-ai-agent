@@ -35,8 +35,19 @@ function defaultHistoricalDate(): string {
 }
 
 function extractErrorMessage(err: unknown): string {
-  const anyErr = err as { error?: { error?: { message?: string } }; message?: string };
-  return anyErr?.error?.error?.message ?? anyErr?.message ?? 'Backtest run failed.';
+  // Backend shape (see `app.core.exception_handlers._handle_domain_error`):
+  // `{ error: { type, message, detail: { broker, error_code, ... } } }`.
+  // `detail.error_code` is the broker's OWN error code (e.g. SmartAPI's
+  // "AGxxxx") -- surfacing it inline means a broker-side auth/session
+  // failure (distinguishable from a genuine "no data for this date")
+  // doesn't require digging through backend logs to identify.
+  const anyErr = err as {
+    error?: { error?: { message?: string; detail?: { error_code?: string } } };
+    message?: string;
+  };
+  const message = anyErr?.error?.error?.message ?? anyErr?.message ?? 'Backtest run failed.';
+  const errorCode = anyErr?.error?.error?.detail?.error_code;
+  return errorCode ? `${message} [${errorCode}]` : message;
 }
 
 // Matches `NoHistoricalDataError`'s own message shape from the backend
