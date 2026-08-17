@@ -103,6 +103,32 @@ class StrategyEngine:
         engine = indicator_engine if indicator_engine is not None else IndicatorEngine()
         indicators = compute_indicators(engine, candles, self.required_indicator_requests)
 
+        return self.analyze_precomputed(symbol, exchange, interval, candles, indicators, session)
+
+    def analyze_precomputed(
+        self,
+        symbol: str,
+        exchange: Exchange,
+        interval: HistoricalInterval,
+        candles: Sequence[MarketCandle],
+        indicators: dict[str, IndicatorResult[Any]],
+        session: MarketSessionState,
+    ) -> ConfluenceResult:
+        """Same merge logic as `analyze_symbol`, but skips indicator
+        computation entirely — `indicators` must already be computed and
+        1:1 aligned with `candles` (each `IndicatorResult.values` the
+        same length as `candles`).
+
+        Exists for `app.backtest.replay_engine`'s walk-forward replay: it
+        precomputes every indicator once for a whole session's candles up
+        front (a single pandas-ta pass per indicator, causal by
+        construction — no future candle ever influences an earlier
+        value), then calls this once per candle with `indicators` sliced
+        to that candle's prefix, instead of paying `analyze_symbol`'s
+        recompute-the-whole-window-from-scratch cost at every one of a
+        session's candles (which turns an O(n) replay into O(n^2)).
+        """
+
         context = _build_context(symbol, exchange, interval, candles, indicators, session)
         signals = [strategy.analyze(context) for strategy in self._strategies]
 

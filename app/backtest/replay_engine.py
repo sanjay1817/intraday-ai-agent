@@ -32,6 +32,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Any
 
 import structlog
 
@@ -41,7 +42,7 @@ from app.core.logging import TRADE_LOGGER_NAME
 from app.domain.enums.trading import Exchange, HistoricalInterval, OrderSide, OrderStatus
 from app.domain.exceptions.indicators import InsufficientDataError
 from app.indicators.engine import IndicatorEngine
-from app.indicators.schemas import ADXPoint, MACDPoint, SingleValuePoint, SuperTrendPoint
+from app.indicators.schemas import ADXPoint, IndicatorResult, MACDPoint, SingleValuePoint, SuperTrendPoint
 from app.instructor.recommendation import RecommendationAction, generate_recommendation
 from app.market.dto import MarketCandle, MarketSessionState
 from app.market.indicator_runtime import compute_indicators
@@ -94,6 +95,21 @@ def _extract_indicator_snapshot(
         elif isinstance(point, MACDPoint):
             snapshot[alias] = point.macd
     return snapshot
+
+
+def _slice_indicators(
+    indicators: dict[str, IndicatorResult[Any]], upto: int
+) -> dict[str, IndicatorResult[Any]]:
+    """The prefix of each indicator's precomputed `values` up to (and
+    including) candle index `upto - 1` — the walk-forward replay's
+    per-candle view into a session precomputed once, up front (see
+    `run_replay`'s own comment for why).
+    """
+
+    return {
+        alias: result.model_copy(update={"values": result.values[:upto]})
+        for alias, result in indicators.items()
+    }
 
 
 def _ratchet_best_price(position: _ReplayPosition, current_price: float) -> _ReplayPosition:
@@ -175,6 +191,30 @@ async def run_replay(
     strategy_engine = StrategyEngine()
     session = MarketSessionState.OPEN
 
+    # Every indicator this session's strategies need, computed ONCE over
+    # the whole candle range up front, rather than recomputed from
+    # scratch at every candle over a growing window (the previous
+    # approach: O(n) work at each of n candles, i.e. O(n^2) overall,
+    # which is what turned a full session at 1-minute resolution into a
+    # multi-minute replay). Every indicator here (SMA/EMA/RSI/MACD/ADX/
+    # SUPERTREND/VWAP/VOLUME_SMA) is a strictly causal, backward-looking
+    # computation — pandas-ta never applies centering/lookahead for any
+    # of them — so `values[i]` from one full-array pass is identical to
+    # recomputing on `candles[: i + 1]` and taking its last value; see
+    # `test_no_look_ahead_bias_earlier_signals_are_unaffected_by_later_candles`,
+    # which specifically guards this invariant. `None` when the WHOLE
+    # session is too short for even the slowest indicator to produce
+    # anything (mirrors the old per-candle `InsufficientDataError`
+    # catch below, just checked once instead of every iteration).
+    full_indicators: dict[str, IndicatorResult[Any]] | None = None
+    if candles:
+        try:
+            full_indicators = compute_indicators(
+                IndicatorEngine(), candles, strategy_engine.required_indicator_requests
+            )
+        except InsufficientDataError:
+            full_indicators = None
+
     trades: list[BacktestTradeRecord] = []
     signal_log: list[SignalLogEntry] = []
     equity_curve: list[EquityPoint] = []
@@ -209,32 +249,16 @@ async def run_replay(
             )
 
         # -- 2. run the strategy on everything known up to and including this candle --
-        # Early candles (fewer rows than the slowest indicator's warm-up
-        # period, e.g. EMA(21)/ADX(14)) raise `InsufficientDataError`
-        # rather than returning a usable-but-empty result -- treated as
-        # an uneventful HOLD, exactly like a live poll cycle that simply
-        # has too little history yet would (see `EMATrendStrategy`'s own
-        # `_no_signal` fallback for the same case once indicators DO
-        # compute but their warm-up values are individually `None`).
+        # `full_indicators is None` means the WHOLE session was too short
+        # for even the slowest indicator's warm-up (e.g. EMA(21)/ADX(14))
+        # to produce anything at all -- an uneventful HOLD, exactly like
+        # a live poll cycle that simply has too little history yet
+        # would. Otherwise, individual indicators can still be
+        # individually `None` this early (each strategy's own
+        # `_no_signal` fallback already handles that case) without the
+        # whole precompute having failed.
         window = candles[: i + 1]
-        indicator_engine = IndicatorEngine()
-        try:
-            confluence = strategy_engine.analyze_symbol(
-                symbol, exchange, interval, window, session, indicator_engine=indicator_engine
-            )
-            recommendation = generate_recommendation(confluence, exchange, now=candle.timestamp)
-            indicator_snapshot = _extract_indicator_snapshot(
-                compute_indicators(
-                    indicator_engine, window, strategy_engine.required_indicator_requests
-                )
-            )
-            action = recommendation.action
-            confidence = recommendation.confidence
-            entry_price = recommendation.entry
-            stop_loss_level = recommendation.stop_loss
-            targets_list = list(recommendation.targets)
-            reasoning_text = recommendation.reasoning
-        except InsufficientDataError:
+        if full_indicators is None:
             action = RecommendationAction.HOLD
             confidence = 0.0
             entry_price = None
@@ -242,6 +266,19 @@ async def run_replay(
             targets_list = []
             reasoning_text = "Insufficient warm-up history for this session's indicators."
             indicator_snapshot = {}
+        else:
+            window_indicators = _slice_indicators(full_indicators, i + 1)
+            confluence = strategy_engine.analyze_precomputed(
+                symbol, exchange, interval, window, window_indicators, session
+            )
+            recommendation = generate_recommendation(confluence, exchange, now=candle.timestamp)
+            indicator_snapshot = _extract_indicator_snapshot(window_indicators)
+            action = recommendation.action
+            confidence = recommendation.confidence
+            entry_price = recommendation.entry
+            stop_loss_level = recommendation.stop_loss
+            targets_list = list(recommendation.targets)
+            reasoning_text = recommendation.reasoning
 
         signal_log.append(
             SignalLogEntry(

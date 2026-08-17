@@ -31,6 +31,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Any
 
 import structlog
 
@@ -43,8 +44,10 @@ from app.domain.exceptions.backtest import OptionHistoricalDataUnavailableError
 from app.domain.exceptions.indicators import InsufficientDataError
 from app.domain.exceptions.market import MarketDataError
 from app.indicators.engine import IndicatorEngine
+from app.indicators.schemas import IndicatorResult
 from app.instructor.recommendation import RecommendationAction, generate_recommendation
 from app.market.dto import MarketCandle, MarketSessionState
+from app.market.indicator_runtime import compute_indicators
 from app.options.expiry_selector import ExpirySelector
 from app.options.exceptions import OptionsError
 from app.options.models import ExpiryMode, OptionType, StrikeMode
@@ -74,6 +77,23 @@ class _OptionPosition:
     entry_time: datetime
     confidence: float | None
     reasoning: str
+
+
+def _slice_indicators(
+    indicators: dict[str, IndicatorResult[Any]], upto: int
+) -> dict[str, IndicatorResult[Any]]:
+    """The prefix of each indicator's precomputed `values` up to (and
+    including) candle index `upto - 1` — mirrors
+    `app.backtest.replay_engine`'s identical helper (re-implemented
+    here, not imported, matching this module's own convention of
+    re-implementing small pieces shared with the equity replay rather
+    than cross-importing).
+    """
+
+    return {
+        alias: result.model_copy(update={"values": result.values[:upto]})
+        for alias, result in indicators.items()
+    }
 
 
 def _candle_at_or_before(candles: list[MarketCandle], timestamp: datetime) -> MarketCandle | None:
@@ -127,22 +147,39 @@ async def run_options_replay(
     position: _OptionPosition | None = None
     peak_equity = initial_capital
 
+    # Every indicator this session's strategies need, computed ONCE over
+    # the whole underlying candle range up front rather than recomputed
+    # from scratch at every candle over a growing window -- see
+    # `app.backtest.replay_engine.run_replay`'s identical precompute for
+    # the full rationale (turns an O(n^2) replay into O(n)) and its
+    # look-ahead-safety justification, which applies unchanged here.
+    # `None` when the WHOLE session is too short for even the slowest
+    # indicator to produce anything.
+    full_indicators: dict[str, IndicatorResult[Any]] | None = None
+    if underlying_candles:
+        try:
+            full_indicators = compute_indicators(
+                IndicatorEngine(), underlying_candles, strategy_engine.required_indicator_requests
+            )
+        except InsufficientDataError:
+            full_indicators = None
+
     for i, candle in enumerate(underlying_candles):
         is_final_candle = i == len(underlying_candles) - 1
         window = underlying_candles[: i + 1]
 
-        # Early candles raise `InsufficientDataError` before enough
-        # warm-up history exists -- see `app.backtest.replay_engine`'s
-        # identical handling for why this is treated as an uneventful
-        # HOLD rather than a fatal error.
-        try:
-            confluence = strategy_engine.analyze_symbol(
-                underlying,
-                underlying_exchange,
-                interval,
-                window,
-                session,
-                indicator_engine=IndicatorEngine(),
+        # `full_indicators is None` means the whole session was too
+        # short for even the slowest indicator's warm-up to produce
+        # anything -- an uneventful HOLD, same as
+        # `app.backtest.replay_engine.run_replay`'s identical handling.
+        if full_indicators is None:
+            action = RecommendationAction.HOLD
+            confidence = 0.0
+            reasoning_text = "Insufficient warm-up history for this session's indicators."
+        else:
+            window_indicators = _slice_indicators(full_indicators, i + 1)
+            confluence = strategy_engine.analyze_precomputed(
+                underlying, underlying_exchange, interval, window, window_indicators, session
             )
             recommendation = generate_recommendation(
                 confluence, underlying_exchange, now=candle.timestamp
@@ -150,10 +187,6 @@ async def run_options_replay(
             action = recommendation.action
             confidence = recommendation.confidence
             reasoning_text = recommendation.reasoning
-        except InsufficientDataError:
-            action = RecommendationAction.HOLD
-            confidence = 0.0
-            reasoning_text = "Insufficient warm-up history for this session's indicators."
 
         signal_log.append(
             SignalLogEntry(
